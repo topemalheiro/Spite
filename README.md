@@ -1,6 +1,6 @@
 # Spite
 
-An open source DAW to finally unite sound engineers, music and audio artists, and programmers as one. An open source DAW to kill all DAWs.
+An open source DAW to finally unite sound engineers, music and audio artists, and programmers as one.
 
 ## About
 
