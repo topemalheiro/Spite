@@ -250,6 +250,12 @@ int main (int argc, char *argv[])
 {
 	console_madness_begin();
 
+	/* GTK derives the window class (what a taskbar uses to match a window to its
+	 * launcher and icon) from the program name, which would otherwise be the
+	 * executable's file name. Set it before any GTK call.
+	 */
+	g_set_prgname (PROGRAM_NAME);
+
 	ARDOUR::check_for_old_configuration_files();
 
 	/* global init is not thread safe.*/

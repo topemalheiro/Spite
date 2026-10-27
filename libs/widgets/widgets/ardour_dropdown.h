@@ -102,9 +102,14 @@ private:
 		}
 	};
 
+	bool on_menu_button_release (GdkEventButton*);
+
 	Gtk::Menu      _menu;
 
 	bool _scrolling_disabled;
+	bool _ignore_click_release;
+	double _press_x;
+	double _press_y;
 };
 
 } /* end namespace */

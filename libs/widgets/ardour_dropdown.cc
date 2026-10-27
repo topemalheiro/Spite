@@ -47,8 +47,12 @@ using namespace std;
 
 ArdourDropdown::ArdourDropdown (Element e)
 	: _scrolling_disabled(false)
+	, _ignore_click_release (false)
+	, _press_x (0)
+	, _press_y (0)
 {
 	_menu.signal_size_request().connect (sigc::mem_fun(*this, &ArdourDropdown::menu_size_request));
+	_menu.signal_button_release_event().connect (sigc::mem_fun (*this, &ArdourDropdown::on_menu_button_release), false);
 
 	_menu.set_reserve_toggle_size(false);
 
@@ -74,10 +78,39 @@ ArdourDropdown::on_button_press_event (GdkEventButton* ev)
 	}
 
 	if (ev->type == GDK_BUTTON_PRESS && ev->button == 1) {
+		_ignore_click_release = true;
+		_press_x = ev->x_root;
+		_press_y = ev->y_root;
 		Gtkmm2ext::anchored_menu_popup(&_menu, this, get_text(), 1, ev->time);
 	}
 
 	return true;
+}
+
+/* GTK2 menus choose the item under the pointer when the button that opened them
+ * is released, unless the release comes within half a second (then it counts as
+ * a click and the menu stays open). Under XWayland that timing is unreliable, so
+ * a plain click could pick the current item and close the menu. Ignore the
+ * release that ends the opening click when the pointer has not moved: a click
+ * opens the menu and a second click chooses, while pressing, dragging to an item
+ * and releasing still selects it.
+ */
+bool
+ArdourDropdown::on_menu_button_release (GdkEventButton* ev)
+{
+	if (!_ignore_click_release) {
+		return false;
+	}
+
+	_ignore_click_release = false;
+
+	if (fabs (ev->x_root - _press_x) < 5 && fabs (ev->y_root - _press_y) < 5) {
+		/* let the choosing click activate its item straight away */
+		GTK_MENU_SHELL (_menu.gobj())->activate_time = 0;
+		return true;
+	}
+
+	return false;
 }
 
 int
