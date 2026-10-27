@@ -837,7 +837,7 @@ def options(opt):
     opt.load('compiler_c')
     opt.load('compiler_cxx')
     autowaf.set_options(opt, debug_by_default=True)
-    opt.add_option('--program-name', type='string', action='store', default='Ardour', dest='program_name',
+    opt.add_option('--program-name', type='string', action='store', default='Spite', dest='program_name',
                     help='The user-visible name of the program being built')
     opt.add_option('--arch', type='string', action='store', dest='arch',
                     help='Architecture-specific compiler FLAGS')
@@ -995,7 +995,7 @@ def configure(conf):
         if itstool != "itstool" or version[0] < "2":
             conf.fatal("--freedesktop requires itstool > 2.0.0 to translate files.")
 
-    conf.env['PROGRAM_NAME'] = Options.options.program_name or 'Ardour'
+    conf.env['PROGRAM_NAME'] = Options.options.program_name or 'Spite'
 
     conf.env['VERSION'] = VERSION
     conf.env['MAJOR'] = MAJOR
@@ -1061,7 +1061,7 @@ def configure(conf):
     if Options.options.lv2dir:
         conf.env['LV2DIR'] = Options.options.lv2dir
     else:
-        conf.env['LV2DIR'] = os.path.join(conf.env['LIBDIR'], 'ardour' + conf.env['MAJOR'], 'LV2')
+        conf.env['LV2DIR'] = os.path.join(conf.env['LIBDIR'], Options.options.program_name.lower() + conf.env['MAJOR'], 'LV2')
 
     conf.env['LV2DIR'] = os.path.normpath(conf.env['LV2DIR'])
 
@@ -1626,7 +1626,7 @@ def build(bld):
     bld.path.find_dir ('libs/pbd/pbd')
 
     # set up target directories
-    lwrcase_dirname = 'ardour' + bld.env['MAJOR']
+    lwrcase_dirname = bld.env['PROGRAM_NAME'].lower() + bld.env['MAJOR']
 
     # configuration files go here
     bld.env['CONFDIR'] = os.path.join(bld.env['SYSCONFDIR'], lwrcase_dirname)
