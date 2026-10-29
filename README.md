@@ -7,7 +7,7 @@ An open source DAW to finally unite sound engineers, music and audiovisual artis
 Spite is a clone of [Ardour](https://ardour.org/), not a fork meant to track it closely. I'm the maintainer, and I'll contribute to it extensively from now on. The changes are big enough that Spite will go its own way:
 
 - **A new look.** A simple, flat art style inspired by PlugData, in place of Ardour's GTK2 interface.
-- **Compatibility with the tools people already use.** Opening Ableton Live sets directly, and running Max for Live devices as PlugData devices inside Spite.
+- **Compatibility with the tools people already use.** Opening Ableton Live sets directly (potentially, and Pro Tools too later perhaps), and running Max for Live devices as PlugData devices inside Spite.
 - **Quality-of-life work.** Shortcuts and workflow improvements throughout.
 
 ## Credit and licence
