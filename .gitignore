@@ -152,3 +152,7 @@ waf3-*
 
 # misc custom files git should ignore
 /local
+
+# personal notes, kept out of the repo
+/Task Ideas.md
+/ShortDesc.md
