@@ -73,6 +73,11 @@ public:
 	ARDOUR::TriggerBox&		 triggerbox() const { return trigger()->box(); }
 
 	void choose_color (Gtk::Window*);
+
+	/* Spite: a clip without a color of its own shows its track's color, like Live */
+	static const uint32_t follow_track_color = 0xBEBEBEFF; /* ARDOUR::Trigger's default color */
+	uint32_t clip_color () const;
+	void use_track_color ();
 	void choose_sample (bool allow_multiple_select);
 	void sample_chosen (int r);
 

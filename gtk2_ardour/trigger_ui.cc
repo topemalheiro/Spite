@@ -143,6 +143,27 @@ TriggerUI::trigger_swap (uint32_t n)
 	trigger_changed (Properties::name);
 }
 
+/* Spite: clip colors follow the track until the user picks one */
+
+uint32_t
+TriggerUI::clip_color () const
+{
+	uint32_t c = trigger ()->color ();
+	if (c == follow_track_color) {
+		ARDOUR::Stripable* s = dynamic_cast<ARDOUR::Stripable*> (tref.box ()->owner ());
+		if (s && s->presentation_info ().color ()) {
+			c = s->presentation_info ().color ();
+		}
+	}
+	return c;
+}
+
+void
+TriggerUI::use_track_color ()
+{
+	trigger ()->set_color (follow_track_color);
+}
+
 void
 TriggerUI::choose_color (Gtk::Window* parent)
 {
@@ -152,7 +173,7 @@ TriggerUI::choose_color (Gtk::Window* parent)
 	}
 
 	_color_dialog->set_title (_("Set Trigger Color"));
-	Gdk::Color c (Gtkmm2ext::gdk_color_from_rgba (trigger()->color()));
+	Gdk::Color c (Gtkmm2ext::gdk_color_from_rgba (clip_color ()));
 	_color_dialog->get_color_selection()->set_current_color (c);
 	_color_dialog->get_color_selection()->set_previous_color (c);
 	if (parent) {
@@ -409,6 +430,8 @@ TriggerUI::context_menu ()
 	items.push_back (MenuElem (_("Load..."), sigc::bind(sigc::mem_fun (*this, (&TriggerUI::choose_sample)), true)));
 	items.push_back (SeparatorElem());
 	items.push_back (MenuElem (_("Color..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::choose_color), (Gtk::Window*)NULL)));
+	items.push_back (MenuElem (_("Use Track Color"), sigc::mem_fun (*this, &TriggerUI::use_track_color)));
+	items.back ().set_sensitive (trigger ()->color () != follow_track_color);
 	items.push_back (MenuElem (_("Clear"), sigc::mem_fun (*this, &TriggerUI::clear_trigger)));
 	items.push_back (SeparatorElem());
 	items.push_back (MenuElem (_("MIDI Learn"), sigc::mem_fun (*this, &TriggerUI::trigger_midi_learn)));

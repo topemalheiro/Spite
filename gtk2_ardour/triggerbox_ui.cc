@@ -188,7 +188,9 @@ TriggerEntry::owner_prop_change (PropertyChange const& pc)
 void
 TriggerEntry::owner_color_changed ()
 {
-	// TODO
+	/* Spite: clips without a color of their own follow the track's */
+	set_widget_colors ();
+	redraw ();
 }
 
 void
@@ -600,6 +602,16 @@ TriggerEntry::set_widget_colors (TriggerEntry::EnteredState es)
 
 	name_text->set_color (trigger ()->color ());
 	name_text->set_fill_color (UIConfiguration::instance ().color ("neutral:midground"));
+
+	/* Spite: a loaded clip is a block of its color (its track's unless the
+	 * user picked one), with readable text, like Live's clip slots */
+	if (trigger ()->playable ()) {
+		const color_t clip = clip_color ();
+		const color_t fill = (es == NameEntered) ? HSV (clip).lighter (0.15).color () : clip;
+		name_button->set_fill_color (fill);
+		name_button->set_outline_color (fill);
+		name_text->set_color (contrasting_text_color (fill));
+	}
 
 	/*preserve selection border*/
 	if (PublicEditor::instance ().get_selection ().selected (this)) {

@@ -620,7 +620,7 @@ SlotPropertyTable::on_trigger_changed (PropertyChange const& pc)
 		_name_label.set_text (trigr->name());
 	}
 	if (pc.contains (Properties::color)) {
-		_color_button.set_custom_led_color (trigr->color());
+		_color_button.set_custom_led_color (clip_color ()); /* Spite: the track's color when the clip follows it */
 	}
 
 	if (pc.contains (Properties::gain)) {
