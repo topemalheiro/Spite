@@ -283,6 +283,8 @@ public:
 	void toggle_mixer_space();
 	void toggle_fullscreen_focused_window ();
 	void toggle_focused_bottom_pane ();
+	/* true if `action` is Common/show-<page> for the page that has focus */
+	bool shows_focused_page (std::string const& action);
 	void toggle_keep_tearoffs();
 	void show_plugin_manager();
 	void show_lua_window();

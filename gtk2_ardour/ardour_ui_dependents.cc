@@ -42,6 +42,7 @@
 #include "actions.h"
 #include "ardour_message.h"
 #include "ardour_ui.h"
+#include "macro_manager.h"
 #include "audio_clip_editor.h"
 #include "public_editor.h"
 #include "meterbridge.h"
@@ -116,6 +117,7 @@ ARDOUR_UI::we_have_dependents ()
 	/* all actions are defined */
 
 	ActionManager::load_menus (ARDOUR_COMMAND_LINE::menus_file);
+	MacroManager::instance ().menus_loaded ();
 
 	/* catch up on parameters */
 

@@ -26,6 +26,8 @@
 #include <ytkmm/stock.h>
 #include <ytkmm/table.h>
 #include <ytkmm/treemodelfilter.h>
+#include <ytkmm/cellrenderertext.h>
+#include <glibmm/markup.h>
 
 #include "pbd/compose.h"
 #include "pbd/unwind.h"
@@ -219,38 +221,88 @@ private:
 
 } // namespace
 
+namespace {
+
+int const bold   = 700;
+int const normal = 400;
+
+/* Global first, then the pages, then the rest by name */
+int
+set_order (string const& set)
+{
+	vector<pair<string, string> > const s = MacroManager::scopes ();
+	for (size_t i = 0; i < s.size (); ++i) {
+		if (s[i].first == set) {
+			return i;
+		}
+	}
+	return s.size ();
+}
+
+struct ShortcutOrder {
+	bool operator() (MacroManager::Shortcut const& a, MacroManager::Shortcut const& b) const
+	{
+		int const oa = set_order (a.set);
+		int const ob = set_order (b.set);
+		if (oa != ob) {
+			return oa < ob;
+		}
+		if (a.set != b.set) {
+			return a.set < b.set;
+		}
+		return lower (a.label) < lower (b.label);
+	}
+};
+
+string
+key_text (KeyboardKey const& key)
+{
+	return (key == KeyboardKey::null_key ()) ? string () : key.display_label ();
+}
+
+} // namespace
+
 MacroEditor::MacroEditor ()
 	: ArdourWindow (_("Macro Editor"))
 	, _new_set_button (_("New"))
 	, _copy_set_button (_("Duplicate"))
 	, _rename_set_button (_("Rename"))
 	, _remove_set_button (_("Delete"))
+	, _new_macro_button (_("New Macro"))
+	, _delete_macro_button (_("Delete Macro"))
 	, _shortcut_button (_("Set Shortcut"))
 	, _clear_shortcut_button (_("Clear"))
+	, _reset_shortcut_button (_("Reset to Default"))
+	, _cycle_button (_("Cycle: each press runs only the next step"))
 	, _add_step_button (_("Add Step..."))
 	, _remove_step_button (_("Remove Step"))
 	, _up_button (_("Move Up"))
 	, _down_button (_("Move Down"))
 	, _record_button (_("Record"))
-	, _run_button (_("Run Macro"))
-	, _clear_button (_("Clear Macro"))
+	, _run_button (_("Run"))
+	, _kind (Heading)
 	, _slot (-1)
 	, _updating (false)
+	, _runnable (false)
 	, _capturing_key (false)
 {
-	_macro_store = ListStore::create (_macro_columns);
-	for (int i = 0; i < MacroManager::n_slots; ++i) {
-		TreeModel::Row row = *_macro_store->append ();
-		row[_macro_columns.slot]   = i;
-		row[_macro_columns.number] = string_compose ("%1", i + 1);
+	_list_store = TreeStore::create (_list_columns);
+	_list_view.set_model (_list_store);
+	_list_view.append_column (_("#"), _list_columns.number);
+	_list_view.append_column (_("Name"), _list_columns.name);
+	_list_view.append_column (_("Shortcut"), _list_columns.shortcut);
+	_list_view.append_column (_("Works in"), _list_columns.where);
+	_list_view.append_column (_("Steps"), _list_columns.steps);
+	_list_view.get_column (1)->set_expand (true);
+	_list_view.set_enable_search (false);
+	for (int c = 0; c < 5; ++c) {
+		TreeViewColumn* col = _list_view.get_column (c);
+		CellRendererText* r = dynamic_cast<CellRendererText*> (col->get_first_cell_renderer ());
+		if (r) {
+			col->add_attribute (r->property_weight (), _list_columns.weight);
+		}
 	}
-	_macro_view.set_model (_macro_store);
-	_macro_view.append_column (_("#"), _macro_columns.number);
-	_macro_view.append_column (_("Macro"), _macro_columns.name);
-	_macro_view.append_column (_("Shortcut"), _macro_columns.shortcut);
-	_macro_view.append_column (_("Steps"), _macro_columns.steps);
-	_macro_view.get_column (1)->set_expand (true);
-	_macro_view.get_selection ()->signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::macro_selection_changed));
+	_list_view.get_selection ()->signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::list_selection_changed));
 
 	_step_store = ListStore::create (_step_columns);
 	_step_view.set_model (_step_store);
@@ -265,22 +317,38 @@ MacroEditor::MacroEditor ()
 	_mode_combo.append_text (_("Turn on"));
 	_mode_combo.append_text (_("Turn off"));
 
+	_show_combo.append_text (_("Everything"));
+	_show_combo.append_text (_("Macros"));
+	_show_combo.append_text (_("Shortcuts"));
+	_show_combo.set_active (0);
+
+	vector<pair<string, string> > const scopes = MacroManager::scopes ();
+	for (vector<pair<string, string> >::const_iterator s = scopes.begin (); s != scopes.end (); ++s) {
+		_scope_combo.append_text (s->second);
+	}
+
 	_set_combo.signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::set_chosen));
 	_new_set_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::new_set));
 	_copy_set_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::copy_set));
 	_rename_set_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::rename_set));
 	_remove_set_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::remove_set));
+	_search.signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::search_changed));
+	_show_combo.signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::search_changed));
+	_new_macro_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::new_macro));
+	_delete_macro_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::delete_macro));
 	_name_entry.signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::name_changed));
 	_shortcut_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::start_key_capture));
 	_clear_shortcut_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::clear_shortcut));
+	_reset_shortcut_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::reset_shortcut));
+	_scope_combo.signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::scope_changed));
+	_cycle_button.signal_toggled ().connect (sigc::mem_fun (*this, &MacroEditor::cycle_toggled));
 	_mode_combo.signal_changed ().connect (sigc::mem_fun (*this, &MacroEditor::mode_changed));
 	_add_step_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::add_step));
 	_remove_step_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::remove_step));
 	_up_button.signal_clicked ().connect (sigc::bind (sigc::mem_fun (*this, &MacroEditor::move_step), -1));
 	_down_button.signal_clicked ().connect (sigc::bind (sigc::mem_fun (*this, &MacroEditor::move_step), 1));
 	_record_button.signal_toggled ().connect (sigc::mem_fun (*this, &MacroEditor::record_toggled));
-	_run_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::run_macro));
-	_clear_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::clear_macro));
+	_run_button.signal_clicked ().connect (sigc::mem_fun (*this, &MacroEditor::run_selected));
 
 	HBox* set_box = manage (new HBox);
 	set_box->set_spacing (6);
@@ -291,17 +359,45 @@ MacroEditor::MacroEditor ()
 	set_box->pack_start (_rename_set_button, false, false);
 	set_box->pack_start (_remove_set_button, false, false);
 
-	ScrolledWindow* macro_scroller = manage (new ScrolledWindow);
-	macro_scroller->set_policy (POLICY_NEVER, POLICY_AUTOMATIC);
-	macro_scroller->add (_macro_view);
-	macro_scroller->set_size_request (420, -1);
+	/* left: search and the list */
+	HBox* search_box = manage (new HBox);
+	search_box->set_spacing (6);
+	search_box->pack_start (*manage (new Label (_("Search:"))), false, false);
+	search_box->pack_start (_search, true, true);
+	search_box->pack_start (*manage (new Label (_("Show:"))), false, false);
+	search_box->pack_start (_show_combo, false, false);
 
-	Table* details = manage (new Table (2, 4));
+	ScrolledWindow* list_scroller = manage (new ScrolledWindow);
+	list_scroller->set_policy (POLICY_AUTOMATIC, POLICY_AUTOMATIC);
+	list_scroller->add (_list_view);
+
+	HBox* list_buttons = manage (new HBox);
+	list_buttons->set_spacing (6);
+	list_buttons->pack_start (_new_macro_button, false, false);
+	list_buttons->pack_start (_delete_macro_button, false, false);
+
+	VBox* left = manage (new VBox);
+	left->set_spacing (6);
+	left->pack_start (*search_box, false, false);
+	left->pack_start (*list_scroller, true, true);
+	left->pack_start (*list_buttons, false, false);
+	left->set_size_request (560, -1);
+
+	/* right: the selected macro or shortcut */
+	_kind_label.set_alignment (0.0, 0.5);
+	/* shown or hidden per selection, not by show_all () */
+	_reset_shortcut_button.set_no_show_all (true);
+	_scope_combo.set_no_show_all (true);
+	_scope_label.set_no_show_all (true);
+	_scope_combo.show ();
+
+	Table* details = manage (new Table (3, 5));
 	details->set_spacings (6);
 	Label* label = manage (new Label (_("Name:")));
 	label->set_alignment (1.0, 0.5);
 	details->attach (*label, 0, 1, 0, 1, FILL, SHRINK);
-	details->attach (_name_entry, 1, 4, 0, 1, EXPAND | FILL, SHRINK);
+	details->attach (_name_entry, 1, 5, 0, 1, EXPAND | FILL, SHRINK);
+
 	label = manage (new Label (_("Shortcut:")));
 	label->set_alignment (1.0, 0.5);
 	_shortcut_label.set_alignment (0.0, 0.5);
@@ -309,6 +405,21 @@ MacroEditor::MacroEditor ()
 	details->attach (_shortcut_label, 1, 2, 1, 2, EXPAND | FILL, SHRINK);
 	details->attach (_shortcut_button, 2, 3, 1, 2, FILL, SHRINK);
 	details->attach (_clear_shortcut_button, 3, 4, 1, 2, FILL, SHRINK);
+	details->attach (_reset_shortcut_button, 4, 5, 1, 2, FILL, SHRINK);
+
+	label = manage (new Label (_("Works in:")));
+	label->set_alignment (1.0, 0.5);
+	HBox* scope_box = manage (new HBox);
+	scope_box->set_spacing (6);
+	scope_box->pack_start (_scope_combo, false, false);
+	scope_box->pack_start (_scope_label, false, false);
+	details->attach (*label, 0, 1, 2, 3, FILL, SHRINK);
+	details->attach (*scope_box, 1, 5, 2, 3, EXPAND | FILL, SHRINK);
+
+	/* fixed size, so messages never move the buttons */
+	_status.set_alignment (0.0, 0.0);
+	_status.set_line_wrap (true);
+	_status.set_size_request (440, 54);
 
 	ScrolledWindow* step_scroller = manage (new ScrolledWindow);
 	step_scroller->set_policy (POLICY_NEVER, POLICY_AUTOMATIC);
@@ -323,54 +434,73 @@ MacroEditor::MacroEditor ()
 	step_buttons->pack_end (_mode_combo, false, false);
 	step_buttons->pack_end (*manage (new Label (_("Selected step:"))), false, false);
 
-	HBox* macro_buttons = manage (new HBox);
-	macro_buttons->set_spacing (6);
-	macro_buttons->pack_start (_record_button, false, false);
-	macro_buttons->pack_start (_run_button, false, false);
-	macro_buttons->pack_end (_clear_button, false, false);
+	HBox* run_buttons = manage (new HBox);
+	run_buttons->set_spacing (6);
+	run_buttons->pack_start (_record_button, false, false);
+	run_buttons->pack_start (_run_button, false, false);
 
 	Label* steps_title = manage (new Label (_("Steps, run in order:")));
 	steps_title->set_alignment (0.0, 0.5);
 
 	VBox* right = manage (new VBox);
 	right->set_spacing (6);
+	right->pack_start (_kind_label, false, false);
 	right->pack_start (*details, false, false);
+	right->pack_start (_status, false, false);
+	right->pack_start (_cycle_button, false, false);
 	right->pack_start (*steps_title, false, false);
 	right->pack_start (*step_scroller, true, true);
 	right->pack_start (*step_buttons, false, false);
-	right->pack_start (*macro_buttons, false, false);
+	right->pack_start (*run_buttons, false, false);
 
 	HBox* main_box = manage (new HBox);
 	main_box->set_spacing (12);
-	main_box->pack_start (*macro_scroller, false, false);
+	main_box->pack_start (*left, true, true);
 	main_box->pack_start (*right, true, true);
 
-	/* fixed size, so status messages never move the buttons */
-	_status.set_alignment (0.0, 0.0);
-	_status.set_line_wrap (true);
-	_status.set_size_request (960, 36);
-
-	Label* help = manage (new Label (_("A macro runs Spite actions in order. Run it from the Macros menu, its shortcut, or a control surface: map a button to the action Macros/macro-N in the surface's settings or Generic MIDI map. Record adds every action you use until you click Stop Recording.")));
+	Label* help = manage (new Label (_("Every macro and every shortcut is listed here. Pick a shortcut to change its key, or add steps to turn it into a macro on the same key. \"Works in\" makes a key work everywhere or on one page only, so one key can do something different on each page. A cycle runs one step per press. Control surfaces run macro N through the action Macros/macro-N.")));
 	help->set_alignment (0.0, 0.5);
 	help->set_line_wrap (true);
-	help->set_size_request (960, -1);
+	help->set_size_request (1060, -1);
 
 	VBox* vbox = manage (new VBox);
 	vbox->set_spacing (8);
 	vbox->set_border_width (8);
 	vbox->pack_start (*set_box, false, false);
 	vbox->pack_start (*main_box, true, true);
-	vbox->pack_start (_status, false, false);
 	vbox->pack_start (*help, false, false);
 	add (*vbox);
 	vbox->show_all ();
 
-	set_default_size (1000, 620);
+	set_default_size (1120, 720);
 
 	MacroManager::instance ().Changed.connect (sigc::mem_fun (*this, &MacroEditor::redisplay));
 
 	redisplay ();
-	_macro_view.get_selection ()->select (TreeModel::Path ("0"));
+
+	/* start on the first macro */
+	TreeModel::Children rows = _list_store->children ();
+	if (!rows.empty () && !rows.begin ()->children ().empty ()) {
+		_list_view.get_selection ()->select (rows.begin ()->children ().begin ());
+	}
+}
+
+bool
+MacroEditor::matches (string const& haystack) const
+{
+	string const words = lower (_search.get_text ());
+	if (words.empty ()) {
+		return true;
+	}
+	string const hay = lower (haystack);
+	istringstream stream (words);
+	string word;
+	while (stream >> word) {
+		if (hay.find (word) == string::npos) {
+			return false;
+		}
+	}
+	return true;
 }
 
 void
@@ -387,74 +517,253 @@ MacroEditor::redisplay ()
 	_set_combo.set_active_text (mm.current_set_name ());
 	_remove_set_button.set_sensitive (names.size () > 1);
 
-	TreeModel::Children rows = _macro_store->children ();
-	for (TreeModel::Children::iterator r = rows.begin (); r != rows.end (); ++r) {
-		int const slot = (*r)[_macro_columns.slot];
-		MacroManager::Macro const& m (mm.macro (slot));
-		KeyboardKey const key = mm.shortcut (slot);
-		size_t const n = m.steps.size ();
-
-		(*r)[_macro_columns.name]     = m.name;
-		(*r)[_macro_columns.shortcut] = (key == KeyboardKey::null_key ()) ? string () : key.display_label ();
-		(*r)[_macro_columns.steps]    = n == 0 ? string () : (n == 1 ? string (_("1 step")) : string_compose (_("%1 steps"), n));
-	}
-
-	show_macro ();
+	fill_list ();
+	show_selection ();
 }
 
 void
-MacroEditor::show_macro ()
+MacroEditor::fill_list ()
+{
+	MacroManager& mm (MacroManager::instance ());
+	int const show = _show_combo.get_active_row_number ();
+
+	_list_store->clear ();
+
+	if (show != 2) {
+		TreeModel::Row heading = *_list_store->append ();
+		heading[_list_columns.kind]   = Heading;
+		heading[_list_columns.slot]   = -1;
+		heading[_list_columns.name]   = string_compose (_("Macros in \"%1\""), mm.current_set_name ());
+		heading[_list_columns.weight] = bold;
+
+		for (int slot = 0; slot < mm.slot_count (); ++slot) {
+			MacroManager::Macro const& m (mm.macro (slot));
+			if (m.empty ()) {
+				continue;
+			}
+			KeyboardKey const key = mm.shortcut (slot);
+			string const where = MacroManager::scope_label (mm.shortcut_scope (slot));
+			size_t const n = m.steps.size ();
+			string steps = n == 1 ? string (_("1 step")) : string_compose (_("%1 steps"), n);
+			if (m.cycle) {
+				steps = string_compose (_("cycle, %1"), steps);
+			}
+			if (!matches (string_compose ("%1 %2 %3 %4", m.name, key_text (key), where, slot + 1))) {
+				continue;
+			}
+			TreeModel::Row row = *_list_store->append (heading.children ());
+			row[_list_columns.kind]     = MacroRow;
+			row[_list_columns.slot]     = slot;
+			row[_list_columns.number]   = string_compose ("%1", slot + 1);
+			row[_list_columns.name]     = m.name;
+			row[_list_columns.shortcut] = key_text (key);
+			row[_list_columns.where]    = key_text (key).empty () ? string () : where;
+			row[_list_columns.steps]    = steps;
+			row[_list_columns.weight]   = normal;
+		}
+	}
+
+	if (show != 1) {
+		vector<MacroManager::Shortcut> shortcuts = mm.shortcuts ();
+		sort (shortcuts.begin (), shortcuts.end (), ShortcutOrder ());
+
+		TreeModel::Row heading = *_list_store->append ();
+		heading[_list_columns.kind]   = Heading;
+		heading[_list_columns.slot]   = -1;
+		heading[_list_columns.name]   = _("Shortcuts");
+		heading[_list_columns.weight] = bold;
+
+		string group_set;
+		TreeModel::iterator group;
+
+		for (vector<MacroManager::Shortcut>::const_iterator s = shortcuts.begin (); s != shortcuts.end (); ++s) {
+			string const label = s->label;
+			string const where = MacroManager::set_label (s->set);
+			string key = key_text (s->key);
+			KeyboardKey dk;
+			if (key.empty () && KeyboardKey::make_key (s->default_key, dk)) {
+				key = string_compose (_("None (was %1)"), dk.display_label ());
+			}
+			if (!matches (string_compose ("%1 %2 %3 %4", label, key, where, s->action))) {
+				continue;
+			}
+			if (!group || group_set != s->set) {
+				group = _list_store->append (heading.children ());
+				(*group)[_list_columns.kind]   = Heading;
+				(*group)[_list_columns.slot]   = -1;
+				(*group)[_list_columns.name]   = where;
+				(*group)[_list_columns.weight] = bold;
+				group_set = s->set;
+			}
+			TreeModel::Row row = *_list_store->append (group->children ());
+			row[_list_columns.kind]     = ShortcutRow;
+			row[_list_columns.slot]     = -1;
+			row[_list_columns.set]      = s->set;
+			row[_list_columns.action]   = s->action;
+			row[_list_columns.name]     = label;
+			row[_list_columns.shortcut] = key;
+			row[_list_columns.where]    = where;
+			row[_list_columns.steps]    = s->default_key.empty () ? string (_("1 step")) : string (_("1 step, key changed"));
+			row[_list_columns.weight]   = normal;
+			row[_list_columns.keyname]  = (s->key == KeyboardKey::null_key ()) ? string () : s->key.name ();
+			row[_list_columns.defkey]   = s->default_key;
+			row[_list_columns.runnable] = s->runnable;
+		}
+	}
+
+	_list_view.expand_all ();
+
+	/* keep the same entry selected */
+	if (!select_row (_list_store->children ())) {
+		_list_view.get_selection ()->unselect_all ();
+	}
+}
+
+bool
+MacroEditor::select_row (TreeModel::Children rows)
+{
+	for (TreeModel::Children::iterator r = rows.begin (); r != rows.end (); ++r) {
+		int const kind = (*r)[_list_columns.kind];
+		bool found = false;
+		if (kind == MacroRow && _kind == MacroRow) {
+			int const slot = (*r)[_list_columns.slot];
+			found = slot == _slot;
+		} else if (kind == ShortcutRow && _kind == ShortcutRow) {
+			string const set = (*r)[_list_columns.set];
+			string const action = (*r)[_list_columns.action];
+			string const keyname = (*r)[_list_columns.keyname];
+			string const defkey = (*r)[_list_columns.defkey];
+			found = set == _set && action == _action && keyname == _key && defkey == _default;
+		}
+		if (found) {
+			_list_view.get_selection ()->select (r);
+			_list_view.scroll_to_row (_list_store->get_path (r));
+			return true;
+		}
+		if (select_row (r->children ())) {
+			return true;
+		}
+	}
+	return false;
+}
+
+string
+MacroEditor::selected_scope () const
+{
+	int const n = _scope_combo.get_active_row_number ();
+	vector<pair<string, string> > const scopes = MacroManager::scopes ();
+	if (n < 0 || n >= (int) scopes.size ()) {
+		return (_kind == MacroRow && _slot >= 0) ? MacroManager::instance ().shortcut_scope (_slot) : string (X_("Global"));
+	}
+	return scopes[n].first;
+}
+
+void
+MacroEditor::show_selection ()
 {
 	MacroManager& mm (MacroManager::instance ());
 	PBD::Unwinder<bool> uw (_updating, true);
-	bool const have = _slot >= 0;
 
-	_name_entry.set_sensitive (have);
-	_shortcut_button.set_sensitive (have);
+	bool const is_macro    = _kind == MacroRow && _slot >= 0;
+	bool const is_shortcut = _kind == ShortcutRow && !_action.empty ();
+	bool const have        = is_macro || is_shortcut;
+
+	_name_entry.set_sensitive (is_macro);
+	_shortcut_button.set_sensitive (have && !_capturing_key);
 	_add_step_button.set_sensitive (have);
 	_record_button.set_sensitive (have);
+	_run_button.set_sensitive (false);
+	_delete_macro_button.set_sensitive (is_macro);
+	_cycle_button.set_sensitive (is_macro);
+	_reset_shortcut_button.set_visible (is_shortcut);
+	_scope_combo.set_visible (!is_shortcut);
+	_scope_combo.set_sensitive (is_macro);
+	_scope_label.set_visible (is_shortcut);
 
 	int const selected = selected_step ();
 	_step_store->clear ();
 
-	if (!have) {
-		_name_entry.set_text (string ());
-		_shortcut_label.set_text (string ());
-		_clear_shortcut_button.set_sensitive (false);
-		_run_button.set_sensitive (false);
-		_clear_button.set_sensitive (false);
-		update_step_buttons ();
-		return;
-	}
+	KeyboardKey key = KeyboardKey::null_key ();
 
-	MacroManager::Macro const& m (mm.macro (_slot));
+	if (is_macro) {
+		MacroManager::Macro const& m (mm.macro (_slot));
+		_kind_label.set_markup (string_compose (_("<b>Macro %1</b>"), _slot + 1));
+		if (_name_entry.get_text () != m.name) {
+			_name_entry.set_text (m.name);
+		}
+		key = mm.shortcut (_slot);
 
-	if (_name_entry.get_text () != m.name) {
-		_name_entry.set_text (m.name);
-	}
+		vector<pair<string, string> > const scopes = MacroManager::scopes ();
+		string const scope = mm.shortcut_scope (_slot);
+		bool listed = false;
+		_scope_combo.set_active (-1);
+		for (size_t i = 0; i < scopes.size (); ++i) {
+			if (scopes[i].first == scope) {
+				_scope_combo.set_active (i);
+				listed = true;
+			}
+		}
+		/* made from a shortcut of another page, such as MIDI */
+		if (!listed) {
+			_scope_label.set_text (string_compose (_("%1 (pick another to move it)"), MacroManager::scope_label (scope)));
+			_scope_label.show ();
+		}
 
-	KeyboardKey const key = mm.shortcut (_slot);
-	bool const has_key = !(key == KeyboardKey::null_key ());
-	if (!_capturing_key) {
-		_shortcut_label.set_text (has_key ? key.display_label () : string (_("None")));
-	}
-	_clear_shortcut_button.set_sensitive (has_key);
+		_cycle_button.set_active (m.cycle);
 
-	for (size_t n = 0; n < m.steps.size (); ++n) {
-		MacroManager::Step const& s (m.steps[n]);
+		for (size_t n = 0; n < m.steps.size (); ++n) {
+			MacroManager::Step const& s (m.steps[n]);
+			TreeModel::Row row = *_step_store->append ();
+			row[_step_columns.index]  = n;
+			row[_step_columns.number] = string_compose ("%1", n + 1);
+			row[_step_columns.action] = MacroManager::exists (s.action) ? MacroManager::action_label (s.action) : string_compose (_("%1 (not available now)"), s.action);
+			row[_step_columns.does]   = does_text (s);
+		}
+		select_step (min (selected, (int) m.steps.size () - 1));
+
+		_record_button.set_active (mm.recording_slot () == _slot);
+		_record_button.set_label (mm.recording_slot () == _slot ? _("Stop Recording") : _("Record"));
+		_run_button.set_sensitive (!m.steps.empty ());
+
+	} else if (is_shortcut) {
+		_kind_label.set_markup (string_compose (_("<b>Shortcut</b>  %1"), Glib::Markup::escape_text (_action)));
+		_name_entry.set_text (_label);
+
+		if (!KeyboardKey::make_key (_key, key)) {
+			key = KeyboardKey::null_key ();
+		}
+
+		_scope_label.set_text (_runnable
+		                       ? string_compose (_("%1 (the page this shortcut belongs to)"), MacroManager::set_label (_set))
+		                       : string_compose (_("%1: copied into every editor, so it can't run on its own or become a macro"), MacroManager::set_label (_set)));
+		_add_step_button.set_sensitive (_runnable);
+		_record_button.set_sensitive (_runnable);
+		_reset_shortcut_button.set_sensitive (!_default.empty ());
+		_cycle_button.set_active (false);
+
 		TreeModel::Row row = *_step_store->append ();
-		row[_step_columns.index]  = n;
-		row[_step_columns.number] = string_compose ("%1", n + 1);
-		row[_step_columns.action] = MacroManager::exists (s.action) ? MacroManager::action_label (s.action) : string_compose (_("%1 (not available now)"), s.action);
-		row[_step_columns.does]   = does_text (s);
+		row[_step_columns.index]  = 0;
+		row[_step_columns.number] = X_("1");
+		row[_step_columns.action] = _label;
+		row[_step_columns.does]   = does_text (MacroManager::Step (_action, MacroManager::Run));
+
+		_record_button.set_active (false);
+		_record_button.set_label (_("Record"));
+		_run_button.set_sensitive (_runnable);
+
+	} else {
+		_kind_label.set_markup (_("<b>Pick a macro or a shortcut</b>"));
+		_name_entry.set_text (string ());
+		_scope_combo.set_active (-1);
+		_cycle_button.set_active (false);
+		_record_button.set_active (false);
+		_record_button.set_label (_("Record"));
 	}
 
-	select_step (min (selected, (int) m.steps.size () - 1));
-
-	_record_button.set_active (mm.recording_slot () == _slot);
-	_record_button.set_label (mm.recording_slot () == _slot ? _("Stop Recording") : _("Record"));
-	_run_button.set_sensitive (!m.steps.empty ());
-	_clear_button.set_sensitive (!m.empty ());
+	if (!_capturing_key) {
+		_shortcut_label.set_text (have ? (key == KeyboardKey::null_key () ? string (_("None")) : key.display_label ()) : string ());
+	}
+	_clear_shortcut_button.set_sensitive (have && !(key == KeyboardKey::null_key ()));
 
 	update_step_buttons ();
 }
@@ -463,14 +772,15 @@ void
 MacroEditor::update_step_buttons ()
 {
 	PBD::Unwinder<bool> uw (_updating, true);
-	int const step = selected_step ();
+	bool const is_macro = _kind == MacroRow && _slot >= 0;
+	int const step = is_macro ? selected_step () : -1;
 	int const count = _step_store->children ().size ();
 
 	_remove_step_button.set_sensitive (step >= 0);
 	_up_button.set_sensitive (step > 0);
 	_down_button.set_sensitive (step >= 0 && step < count - 1);
 
-	if (step < 0 || _slot < 0) {
+	if (step < 0) {
 		_mode_combo.set_active (-1);
 		_mode_combo.set_sensitive (false);
 		return;
@@ -504,16 +814,35 @@ MacroEditor::select_step (int n)
 }
 
 void
-MacroEditor::macro_selection_changed ()
+MacroEditor::list_selection_changed ()
 {
 	if (_updating) {
 		return;
 	}
 	stop_key_capture ();
-	TreeModel::iterator i = _macro_view.get_selection ()->get_selected ();
-	_slot = i ? (int) (*i)[_macro_columns.slot] : -1;
+
+	TreeModel::iterator i = _list_view.get_selection ()->get_selected ();
+	if (!i) {
+		_kind = Heading;
+		_slot = -1;
+		_set.clear ();
+		_action.clear ();
+		_key.clear ();
+		_default.clear ();
+		_label.clear ();
+		_runnable = false;
+	} else {
+		_kind   = (RowKind) (int) (*i)[_list_columns.kind];
+		_slot   = (*i)[_list_columns.slot];
+		_set     = (string) (*i)[_list_columns.set];
+		_action  = (string) (*i)[_list_columns.action];
+		_key      = (string) (*i)[_list_columns.keyname];
+		_default  = (string) (*i)[_list_columns.defkey];
+		_label    = (string) (*i)[_list_columns.name];
+		_runnable = (*i)[_list_columns.runnable];
+	}
 	_status.set_text (string ());
-	show_macro ();
+	show_selection ();
 }
 
 void
@@ -526,9 +855,19 @@ MacroEditor::step_selection_changed ()
 }
 
 void
+MacroEditor::search_changed ()
+{
+	if (_updating) {
+		return;
+	}
+	PBD::Unwinder<bool> uw (_updating, true);
+	fill_list ();
+}
+
+void
 MacroEditor::name_changed ()
 {
-	if (_updating || _slot < 0) {
+	if (_updating || _kind != MacroRow || _slot < 0) {
 		return;
 	}
 	MacroManager::Macro m = MacroManager::instance ().macro (_slot);
@@ -541,7 +880,7 @@ MacroEditor::mode_changed ()
 {
 	int const step = selected_step ();
 	int const mode = _mode_combo.get_active_row_number ();
-	if (_updating || _slot < 0 || step < 0 || mode < 0) {
+	if (_updating || _kind != MacroRow || _slot < 0 || step < 0 || mode < 0) {
 		return;
 	}
 	MacroManager::Macro m = MacroManager::instance ().macro (_slot);
@@ -551,14 +890,53 @@ MacroEditor::mode_changed ()
 }
 
 void
+MacroEditor::cycle_toggled ()
+{
+	if (_updating || _kind != MacroRow || _slot < 0) {
+		return;
+	}
+	MacroManager::Macro m = MacroManager::instance ().macro (_slot);
+	m.cycle = _cycle_button.get_active ();
+	MacroManager::instance ().set_macro (_slot, m);
+	_status.set_text (m.cycle ? _("Each press now runs the next step, skipping steps that would change nothing (like showing the page you are already on).") : _("Each press now runs every step in order."));
+}
+
+bool
+MacroEditor::take_key_from_holder (KeyboardKey const& key, string const& scope, string const& self)
+{
+	MacroManager& mm (MacroManager::instance ());
+	string const holder = mm.key_holder (key, scope, self);
+	if (holder.empty ()) {
+		return true;
+	}
+
+	string const holder_label = MacroManager::action_label (holder);
+	ArdourMessageDialog msg (*this,
+	                         string_compose (_("%1 is the shortcut for \"%2\" (%3).\n\nUse it here instead? \"%2\" will have no shortcut there. You can give it one again later, or use Reset to Default."),
+	                                         key.display_label (), holder_label, MacroManager::scope_label (scope)),
+	                         false, MESSAGE_QUESTION, BUTTONS_NONE, true);
+	msg.add_button (Stock::CANCEL, RESPONSE_CANCEL);
+	msg.add_button (_("Use It Here"), RESPONSE_ACCEPT);
+	msg.set_default_response (RESPONSE_ACCEPT);
+
+	if (msg.run () != RESPONSE_ACCEPT) {
+		_status.set_text (string_compose (_("%1 still runs \"%2\"."), key.display_label (), holder_label));
+		return false;
+	}
+	mm.take_key (key, scope, self);
+	return true;
+}
+
+void
 MacroEditor::start_key_capture ()
 {
-	if (_slot < 0) {
+	if (_kind == Heading) {
 		return;
 	}
 	_capturing_key = true;
-	_shortcut_label.set_text (_("Press the keys now (Esc cancels)"));
+	_shortcut_label.set_text (_("Press the key now (Esc cancels)"));
 	_shortcut_button.set_sensitive (false);
+	_status.set_text (_("Any key works, with or without Ctrl, Alt or Shift: Tab, a letter, F5..."));
 }
 
 void
@@ -568,8 +946,7 @@ MacroEditor::stop_key_capture ()
 		return;
 	}
 	_capturing_key = false;
-	_shortcut_button.set_sensitive (_slot >= 0);
-	show_macro ();
+	show_selection ();
 }
 
 bool
@@ -585,45 +962,254 @@ MacroEditor::on_key_press_event (GdkEventKey* ev)
 
 	if (ev->keyval == GDK_Escape) {
 		stop_key_capture ();
+		_status.set_text (string ());
 		return true;
 	}
 
 	GdkModifierType const mod = (GdkModifierType) (ev->state & Keyboard::RelevantModifierKeyMask);
 	KeyboardKey const key (mod, gdk_keyval_to_lower (ev->keyval));
-	string const conflict = MacroManager::instance ().key_conflict (key, _slot);
 
 	stop_key_capture ();
-
-	if (!conflict.empty ()) {
-		_status.set_text (string_compose (_("%1. Pick another key, or change that shortcut in Window > Keyboard Shortcuts first."), conflict));
-		return true;
-	}
-
-	MacroManager::instance ().set_shortcut (_slot, key);
-	_status.set_text (string_compose (_("%1 now runs this macro. Menus show new shortcuts after a restart."), key.display_label ()));
+	use_key (key);
 	return true;
 }
 
 bool
-MacroEditor::on_delete_event (GdkEventAny* ev)
+MacroEditor::take_key_for (KeyboardKey const& key, string const& scope, string const& self, string const& what)
 {
-	stop_key_capture ();
-	MacroManager::instance ().stop_recording ();
-	return ArdourWindow::on_delete_event (ev);
+	MacroManager& mm (MacroManager::instance ());
+	vector<MacroManager::KeyUse> const uses = mm.key_uses (key, self);
+	if (uses.empty ()) {
+		return true;
+	}
+
+	string here_label;
+	string list;
+	for (vector<MacroManager::KeyUse>::const_iterator u = uses.begin (); u != uses.end (); ++u) {
+		if (u->set == scope) {
+			here_label = u->label;
+		}
+		list += string_compose (_("\n    \"%1\" (%2)"), u->label, MacroManager::set_label (u->set));
+	}
+
+	bool const only_here = uses.size () == 1 && !here_label.empty ();
+	string text = string_compose (_("%1 already does:%2\n\n"), key.display_label (), list);
+	if (only_here) {
+		text += string_compose (_("Use it for %1 instead? \"%2\" loses it; Reset to Default gives it back."), what, here_label);
+	} else {
+		text += string_compose (_("A page's or an editor's own key wins over a key that works everywhere. \"Take It From All\" makes %1 run %2 everywhere; Reset to Default gives each key back."), key.display_label (), what);
+	}
+
+	ArdourMessageDialog msg (*this, text, false, MESSAGE_QUESTION, BUTTONS_NONE, true);
+	msg.add_button (Stock::CANCEL, RESPONSE_CANCEL);
+	if (only_here) {
+		msg.add_button (_("Use It Here"), RESPONSE_YES);
+	} else {
+		msg.add_button (here_label.empty () ? _("Keep Theirs") : string_compose (_("Take It From \"%1\" Only"), here_label), RESPONSE_NO);
+		msg.add_button (_("Take It From All"), RESPONSE_YES);
+	}
+	msg.set_default_response (RESPONSE_YES);
+
+	int const r = msg.run ();
+	if (r == RESPONSE_YES) {
+		for (vector<MacroManager::KeyUse>::const_iterator u = uses.begin (); u != uses.end (); ++u) {
+			mm.take_key (key, u->set, self);
+		}
+		return true;
+	}
+	if (r == RESPONSE_NO) {
+		mm.take_key (key, scope, self);
+		return true;
+	}
+	_status.set_text (string_compose (_("%1 is unchanged."), key.display_label ()));
+	return false;
+}
+
+void
+MacroEditor::use_key (KeyboardKey const& key)
+{
+	MacroManager& mm (MacroManager::instance ());
+	string scope;
+	string self;
+	string what;
+
+	if (_kind == MacroRow && _slot >= 0) {
+		scope = selected_scope ();
+		self  = MacroManager::action_path (_slot);
+		what  = _("this macro");
+	} else if (_kind == ShortcutRow && !_action.empty ()) {
+		scope = _set;
+		self  = _action;
+		what  = string_compose (_("\"%1\""), _label);
+	} else {
+		return;
+	}
+
+	if (!take_key_for (key, scope, self, what)) {
+		return;
+	}
+
+	if (_kind == MacroRow) {
+		mm.set_shortcut (_slot, key, scope);
+	} else {
+		change_builtin_key (key);
+	}
+
+	string done = string_compose (_("%1 now runs %2 (%3)."), key.display_label (), what, MacroManager::set_label (scope));
+	vector<MacroManager::KeyUse> const left = mm.key_uses (key, self);
+	if (!left.empty ()) {
+		done += " " + string_compose (_("It still does %1 other things where their own key wins."), left.size ());
+	}
+	_status.set_text (done + " " + _("Menus show new shortcuts after a restart."));
+}
+
+void
+MacroEditor::scope_changed ()
+{
+	if (_updating || _kind != MacroRow || _slot < 0) {
+		return;
+	}
+	MacroManager& mm (MacroManager::instance ());
+	string const scope = selected_scope ();
+	KeyboardKey const key = mm.shortcut (_slot);
+
+	if (!(key == KeyboardKey::null_key ()) && !take_key_from_holder (key, scope, MacroManager::action_path (_slot))) {
+		show_selection ();
+		return;
+	}
+	mm.set_shortcut_scope (_slot, scope);
+	_status.set_text (scope == X_("Global") ? string (_("The shortcut works on every page.")) : string_compose (_("The shortcut works only on the %1 page, where it wins over a key that works everywhere."), MacroManager::scope_label (scope)));
 }
 
 void
 MacroEditor::clear_shortcut ()
 {
-	if (_slot >= 0) {
-		MacroManager::instance ().clear_shortcut (_slot);
+	MacroManager& mm (MacroManager::instance ());
+	if (_kind == MacroRow && _slot >= 0) {
+		mm.clear_shortcut (_slot);
+	} else if (_kind == ShortcutRow && !_action.empty ()) {
+		change_builtin_key (KeyboardKey::null_key ());
+		_status.set_text (string_compose (_("\"%1\" has no shortcut now. It stays in the list, and Reset to Default gives its key back."), _label));
 	}
+}
+
+void
+MacroEditor::reset_shortcut ()
+{
+	if (_kind != ShortcutRow || _action.empty ()) {
+		return;
+	}
+	string const def = _default;
+	string const key = _key;
+	_key     = def;
+	_default.clear ();
+	string const problem = MacroManager::instance ().reset_builtin_key (_set, _action, def);
+	if (!problem.empty ()) {
+		_key     = key;
+		_default = def;
+		redisplay ();
+	}
+	_status.set_text (problem.empty () ? string (_("Back to its default key.")) : problem);
+}
+
+int
+MacroEditor::make_macro_from_shortcut ()
+{
+	MacroManager& mm (MacroManager::instance ());
+	string const set = _set;
+	string const action = _action;
+	string const def = _default;
+	string const label = _label;
+
+	KeyboardKey key;
+	if (!KeyboardKey::make_key (_key, key)) {
+		key = KeyboardKey::null_key ();
+	}
+
+	vector<MacroManager::Step> steps;
+	steps.push_back (MacroManager::Step (action, MacroManager::Run));
+	int const slot = mm.new_macro (label, steps);
+	if (slot < 0) {
+		return -1;
+	}
+
+	_kind = MacroRow;
+	_slot = slot;
+	_set.clear ();
+	_action.clear ();
+	_key.clear ();
+	_default.clear ();
+
+	/* the key moves to the macro, on the same page */
+	if (!(key == KeyboardKey::null_key ())) {
+		mm.set_builtin_key (set, action, key, KeyboardKey::null_key (), def);
+		mm.set_shortcut (slot, key, set);
+	}
+
+	redisplay ();
+
+	_status.set_text (key == KeyboardKey::null_key ()
+	                  ? string_compose (_("\"%1\" is now macro %2."), label, slot + 1)
+	                  : string_compose (_("\"%1\" is now macro %2, still on %3 (%4)."), label, slot + 1, key.display_label (), MacroManager::scope_label (set)));
+	return slot;
+}
+
+void
+MacroEditor::change_builtin_key (KeyboardKey const& key)
+{
+	KeyboardKey old;
+	if (!KeyboardKey::make_key (_key, old)) {
+		old = KeyboardKey::null_key ();
+	}
+	string const def = _default;
+
+	/* the entry's new identity, so the list keeps it selected */
+	string const new_name = (key == KeyboardKey::null_key ()) ? string () : key.name ();
+	string new_default = def.empty () ? _key : def;
+	if (new_name == new_default) {
+		new_default.clear ();
+	}
+	_key     = new_name;
+	_default = new_default;
+
+	MacroManager::instance ().set_builtin_key (_set, _action, old, key, def);
+}
+
+void
+MacroEditor::new_macro ()
+{
+	int const slot = MacroManager::instance ().new_macro (string ());
+	if (slot < 0) {
+		return;
+	}
+	_kind = MacroRow;
+	_slot = slot;
+	_search.set_text (string ());
+	redisplay ();
+	_name_entry.grab_focus ();
+	_status.set_text (_("Name it, give it a shortcut, then add steps or record them."));
+}
+
+void
+MacroEditor::delete_macro ()
+{
+	if (_kind != MacroRow || _slot < 0) {
+		return;
+	}
+	ArdourMessageDialog msg (*this, string_compose (_("Delete macro %1, \"%2\"?"), _slot + 1, MacroManager::instance ().macro (_slot).name), false, MESSAGE_QUESTION, BUTTONS_YES_NO, true);
+	if (msg.run () != RESPONSE_YES) {
+		return;
+	}
+	int const slot = _slot;
+	_kind = Heading;
+	_slot = -1;
+	MacroManager::instance ().delete_macro (slot);
 }
 
 void
 MacroEditor::add_step ()
 {
-	if (_slot < 0) {
+	if (_kind == Heading) {
 		return;
 	}
 
@@ -633,6 +1219,10 @@ MacroEditor::add_step ()
 	}
 	string const path = picker.chosen ();
 	if (path.empty ()) {
+		return;
+	}
+
+	if (_kind == ShortcutRow && make_macro_from_shortcut () < 0) {
 		return;
 	}
 
@@ -651,7 +1241,7 @@ void
 MacroEditor::remove_step ()
 {
 	int const step = selected_step ();
-	if (_slot < 0 || step < 0) {
+	if (_kind != MacroRow || _slot < 0 || step < 0) {
 		return;
 	}
 	MacroManager::Macro m = MacroManager::instance ().macro (_slot);
@@ -664,7 +1254,7 @@ void
 MacroEditor::move_step (int direction)
 {
 	int const step = selected_step ();
-	if (_slot < 0 || step < 0) {
+	if (_kind != MacroRow || _slot < 0 || step < 0) {
 		return;
 	}
 	MacroManager::Macro m = MacroManager::instance ().macro (_slot);
@@ -691,7 +1281,15 @@ MacroEditor::record_toggled ()
 		return;
 	}
 
-	if (_slot < 0) {
+	if (_kind == ShortcutRow) {
+		if (make_macro_from_shortcut () < 0) {
+			PBD::Unwinder<bool> uw (_updating, true);
+			_record_button.set_active (false);
+			return;
+		}
+	}
+
+	if (_kind != MacroRow || _slot < 0) {
 		PBD::Unwinder<bool> uw (_updating, true);
 		_record_button.set_active (false);
 		return;
@@ -702,24 +1300,24 @@ MacroEditor::record_toggled ()
 }
 
 void
-MacroEditor::run_macro ()
+MacroEditor::run_selected ()
 {
-	if (_slot >= 0) {
+	if (_kind == MacroRow && _slot >= 0) {
 		MacroManager::instance ().run (_slot);
+	} else if (_kind == ShortcutRow && !_action.empty ()) {
+		Glib::RefPtr<Action> act = ActionManager::get_action (_action, false);
+		if (act) {
+			act->activate ();
+		}
 	}
 }
 
-void
-MacroEditor::clear_macro ()
+bool
+MacroEditor::on_delete_event (GdkEventAny* ev)
 {
-	if (_slot < 0) {
-		return;
-	}
-	ArdourMessageDialog msg (*this, string_compose (_("Clear macro %1? Its shortcut stays with the slot."), _slot + 1), false, MESSAGE_QUESTION, BUTTONS_YES_NO, true);
-	if (msg.run () != RESPONSE_YES) {
-		return;
-	}
-	MacroManager::instance ().set_macro (_slot, MacroManager::Macro ());
+	stop_key_capture ();
+	MacroManager::instance ().stop_recording ();
+	return ArdourWindow::on_delete_event (ev);
 }
 
 void

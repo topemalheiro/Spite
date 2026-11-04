@@ -775,38 +775,7 @@
     <menu name='Macros' action='MacrosMenu'>
       <menuitem action='toggle-macro-editor'/>
       <separator/>
-      <menuitem action='Macros/macro-1'/>
-      <menuitem action='Macros/macro-2'/>
-      <menuitem action='Macros/macro-3'/>
-      <menuitem action='Macros/macro-4'/>
-      <menuitem action='Macros/macro-5'/>
-      <menuitem action='Macros/macro-6'/>
-      <menuitem action='Macros/macro-7'/>
-      <menuitem action='Macros/macro-8'/>
-      <menuitem action='Macros/macro-9'/>
-      <menuitem action='Macros/macro-10'/>
-      <menuitem action='Macros/macro-11'/>
-      <menuitem action='Macros/macro-12'/>
-      <menuitem action='Macros/macro-13'/>
-      <menuitem action='Macros/macro-14'/>
-      <menuitem action='Macros/macro-15'/>
-      <menuitem action='Macros/macro-16'/>
-      <menuitem action='Macros/macro-17'/>
-      <menuitem action='Macros/macro-18'/>
-      <menuitem action='Macros/macro-19'/>
-      <menuitem action='Macros/macro-20'/>
-      <menuitem action='Macros/macro-21'/>
-      <menuitem action='Macros/macro-22'/>
-      <menuitem action='Macros/macro-23'/>
-      <menuitem action='Macros/macro-24'/>
-      <menuitem action='Macros/macro-25'/>
-      <menuitem action='Macros/macro-26'/>
-      <menuitem action='Macros/macro-27'/>
-      <menuitem action='Macros/macro-28'/>
-      <menuitem action='Macros/macro-29'/>
-      <menuitem action='Macros/macro-30'/>
-      <menuitem action='Macros/macro-31'/>
-      <menuitem action='Macros/macro-32'/>
+      <placeholder name='MacroList'/>
       <separator/>
       <menuitem action='Macros/current-set'/>
       <menuitem action='Macros/previous-set'/>

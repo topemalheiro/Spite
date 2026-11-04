@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
 
 #include <glib/gstdio.h>
 #include <glibmm/fileutils.h>
@@ -36,6 +37,7 @@
 
 #include "gtkmm2ext/actions.h"
 
+#include "ardour_ui.h"
 #include "macro_manager.h"
 
 #include "pbd/i18n.h"
@@ -74,6 +76,8 @@ strip_mnemonic (string const& label)
 	return out;
 }
 
+static string const macro_prefix = X_("Macros/macro-");
+
 MacroManager&
 MacroManager::instance ()
 {
@@ -83,7 +87,9 @@ MacroManager::instance ()
 
 MacroManager::MacroManager ()
 	: _current (0)
-	, _shortcuts (n_slots)
+	, _registered (0)
+	, _merge_id (0)
+	, _menus_loaded (false)
 	, _depth (0)
 	, _recording_slot (-1)
 	, _activation_depth (0)
@@ -93,7 +99,17 @@ MacroManager::MacroManager ()
 string
 MacroManager::action_path (int slot)
 {
-	return string_compose (X_("Macros/macro-%1"), slot + 1);
+	return string_compose (X_("%1%2"), macro_prefix, slot + 1);
+}
+
+int
+MacroManager::slot_of (string const& path)
+{
+	if (path.compare (0, macro_prefix.size (), macro_prefix) != 0) {
+		return -1;
+	}
+	int const n = atoi (path.substr (macro_prefix.size ()).c_str ());
+	return n >= 1 ? n - 1 : -1;
 }
 
 string
@@ -118,6 +134,56 @@ MacroManager::exists (string const& path)
 	return (bool) ActionManager::get_action (path, false);
 }
 
+vector<pair<string, string> >
+MacroManager::scopes ()
+{
+	vector<pair<string, string> > s;
+	s.push_back (make_pair (string (X_("Global")), string (_("Everywhere"))));
+	s.push_back (make_pair (string (X_("Editor")), string (_("Editor"))));
+	s.push_back (make_pair (string (X_("Mixer")), string (_("Mixer"))));
+	s.push_back (make_pair (string (X_("Cues")), string (_("Cues"))));
+	s.push_back (make_pair (string (X_("Recorder")), string (_("Recorder"))));
+	return s;
+}
+
+string
+MacroManager::scope_label (string const& set)
+{
+	vector<pair<string, string> > const s = scopes ();
+	for (vector<pair<string, string> >::const_iterator i = s.begin (); i != s.end (); ++i) {
+		if (i->first == set) {
+			return i->second;
+		}
+	}
+	return set;
+}
+
+string
+MacroManager::set_label (string const& set)
+{
+	for (list<Bindings*>::const_iterator b = Bindings::bindings.begin (); b != Bindings::bindings.end (); ++b) {
+		if ((*b)->parent () && (*b)->parent ()->name () == set) {
+			return string_compose (_("%1, every editor"), scope_label (set));
+		}
+	}
+	return scope_label (set);
+}
+
+string
+MacroManager::binding_label (Bindings const* set, string const& action)
+{
+	if (exists (action)) {
+		return action_label (action);
+	}
+	/* a template's names are relative: each editor's copy prefixes its own name */
+	for (list<Bindings*>::const_iterator b = Bindings::bindings.begin (); b != Bindings::bindings.end (); ++b) {
+		if ((*b)->parent () == set && exists ((*b)->name () + action)) {
+			return action_label ((*b)->name () + action);
+		}
+	}
+	return string ();
+}
+
 string
 MacroManager::filename () const
 {
@@ -129,10 +195,7 @@ MacroManager::register_actions ()
 {
 	_group = ActionManager::create_action_group (Bindings::get_bindings (X_("Global")), X_("Macros"));
 
-	for (int i = 0; i < n_slots; ++i) {
-		ActionManager::register_action (_group, string_compose (X_("macro-%1"), i + 1).c_str (), string_compose (_("Macro %1"), i + 1).c_str (),
-		                                sigc::bind (sigc::mem_fun (*this, &MacroManager::run), i));
-	}
+	ensure_actions (min_actions);
 
 	/* insensitive menu item that names the macro set in use */
 	ActionManager::register_action (_group, X_("current-set"), _("Macro Set"));
@@ -143,10 +206,23 @@ MacroManager::register_actions ()
 }
 
 void
+MacroManager::ensure_actions (int count)
+{
+	if (!_group) {
+		return;
+	}
+	count = min (count, (int) max_macros);
+	for (; _registered < count; ++_registered) {
+		ActionManager::register_action (_group, string_compose (X_("macro-%1"), _registered + 1).c_str (), string_compose (_("Macro %1"), _registered + 1).c_str (),
+		                                sigc::bind (sigc::mem_fun (*this, &MacroManager::run), _registered));
+	}
+}
+
+void
 MacroManager::proxy_connected (Glib::RefPtr<Gtk::Action> const& act, Gtk::Widget* widget)
 {
-	/* the menubar is shown with show_all (), which would also show the hidden empty slots */
-	if (act->get_accel_path ().find (X_("<Actions>/Macros/macro-")) == 0) {
+	/* the menubar is shown with show_all (), which would also show hidden macros */
+	if (act->get_accel_path ().find (X_("<Actions>/") + macro_prefix) == 0) {
 		widget->set_no_show_all (true);
 		widget->set_visible (act->get_visible ());
 	}
@@ -157,7 +233,9 @@ MacroManager::load ()
 {
 	_sets.clear ();
 	_current = 0;
-	_shortcuts.assign (n_slots, string ());
+	_shortcuts.clear ();
+	_key_changes.clear ();
+	_cycle_position.clear ();
 
 	string const path = filename ();
 	XMLTree tree;
@@ -172,9 +250,33 @@ MacroManager::load ()
 			int slot;
 
 			if (node.name () == X_("Shortcut")) {
-				string key;
-				if (node.get_property (X_("slot"), slot) && node.get_property (X_("key"), key) && slot >= 1 && slot <= n_slots) {
-					_shortcuts[slot - 1] = key;
+				Binding b;
+				if (!node.get_property (X_("slot"), slot) || slot < 1 || slot > max_macros) {
+					continue;
+				}
+				node.get_property (X_("key"), b.key);
+				if (!node.get_property (X_("scope"), b.scope) || b.scope.empty ()) {
+					b.scope = X_("Global");
+				}
+				if (b.scope == X_("Editing")) {
+					/* a template copied into every editor, not the Editor page */
+					b.scope = X_("Editor");
+				}
+				if ((int) _shortcuts.size () < slot) {
+					_shortcuts.resize (slot);
+				}
+				_shortcuts[slot - 1] = b;
+				continue;
+			}
+
+			if (node.name () == X_("KeyChange")) {
+				KeyChange kc;
+				if (node.get_property (X_("set"), kc.set) && node.get_property (X_("action"), kc.action) && !kc.set.empty () && !kc.action.empty ()) {
+					node.get_property (X_("from"), kc.from);
+					node.get_property (X_("to"), kc.to);
+					if (!kc.from.empty () && kc.from != kc.to) {
+						_key_changes.push_back (kc);
+					}
 				}
 				continue;
 			}
@@ -184,17 +286,20 @@ MacroManager::load ()
 			}
 
 			MacroSet set;
-			set.macros.resize (n_slots);
 			if (!node.get_property (X_("name"), set.name) || set.name.empty () || find_set (set.name)) {
 				continue;
 			}
 
 			for (XMLNodeConstIterator m = node.children ().begin (); m != node.children ().end (); ++m) {
-				if ((*m)->name () != X_("Macro") || !(*m)->get_property (X_("slot"), slot) || slot < 1 || slot > n_slots) {
+				if ((*m)->name () != X_("Macro") || !(*m)->get_property (X_("slot"), slot) || slot < 1 || slot > max_macros) {
 					continue;
+				}
+				if ((int) set.macros.size () < slot) {
+					set.macros.resize (slot);
 				}
 				Macro& macro (set.macros[slot - 1]);
 				(*m)->get_property (X_("name"), macro.name);
+				(*m)->get_property (X_("cycle"), macro.cycle);
 
 				for (XMLNodeConstIterator s = (*m)->children ().begin (); s != (*m)->children ().end (); ++s) {
 					string action;
@@ -221,8 +326,17 @@ MacroManager::load ()
 		}
 	}
 
+	apply_key_changes ();
 	update_actions ();
 	apply_shortcuts ();
+	update_menu ();
+}
+
+void
+MacroManager::menus_loaded ()
+{
+	_menus_loaded = true;
+	update_menu ();
 }
 
 void
@@ -230,7 +344,7 @@ MacroManager::seed_starter_set ()
 {
 	MacroSet set;
 	set.name = _("Starter");
-	set.macros.resize (n_slots);
+	set.macros.resize (4);
 
 	Macro& clean (set.macros[0]);
 	clean.name = _("Cue Page Without Panels");
@@ -249,6 +363,12 @@ MacroManager::seed_starter_set ()
 	edit.steps.push_back (Step (X_("Common/show-editor"), Run));
 	edit.steps.push_back (Step (X_("Editor/show-editor-mixer"), TurnOn));
 	edit.steps.push_back (Step (X_("Editor/show-editor-list"), TurnOff));
+
+	Macro& cycle (set.macros[3]);
+	cycle.name = _("Cycle Cues and Editor");
+	cycle.cycle = true;
+	cycle.steps.push_back (Step (X_("Common/show-trigger"), Run));
+	cycle.steps.push_back (Step (X_("Common/show-editor"), Run));
 
 	_sets.push_back (set);
 	_current = 0;
@@ -317,8 +437,6 @@ MacroManager::add_set (string const& name, bool copy_current)
 	MacroSet set;
 	if (copy_current) {
 		set = current ();
-	} else {
-		set.macros.resize (n_slots);
 	}
 	set.name = name;
 	_sets.push_back (set);
@@ -364,26 +482,96 @@ MacroManager::previous_set ()
 	changed ();
 }
 
+int
+MacroManager::slot_count () const
+{
+	return current ().macros.size ();
+}
+
 MacroManager::Macro const&
 MacroManager::macro (int slot) const
 {
+	static Macro const none;
+	if (slot < 0 || slot >= (int) current ().macros.size ()) {
+		return none;
+	}
 	return current ().macros[slot];
 }
 
 void
 MacroManager::set_macro (int slot, Macro const& m)
 {
-	if (slot < 0 || slot >= n_slots) {
+	if (slot < 0 || slot >= max_macros) {
 		return;
 	}
+	if ((int) current ().macros.size () <= slot) {
+		current ().macros.resize (slot + 1);
+	}
 	current ().macros[slot] = m;
+	changed ();
+}
+
+int
+MacroManager::new_macro (string const& name, vector<Step> const& steps)
+{
+	vector<Macro>& macros (current ().macros);
+	int slot = 0;
+	while (slot < (int) macros.size () && !macros[slot].empty ()) {
+		++slot;
+	}
+	if (slot >= max_macros) {
+		return -1;
+	}
+	Macro m;
+	m.name  = name.empty () ? string_compose (_("Macro %1"), slot + 1) : name;
+	m.steps = steps;
+	set_macro (slot, m);
+	return slot;
+}
+
+void
+MacroManager::delete_macro (int slot)
+{
+	if (slot < 0 || slot >= (int) current ().macros.size ()) {
+		return;
+	}
+	if (_recording_slot == slot) {
+		stop_recording ();
+	}
+	current ().macros[slot] = Macro ();
+
+	/* keys belong to macro numbers, shared by every set: keep the key
+	 * while another set still has a macro with this number
+	 */
+	bool used = false;
+	for (vector<MacroSet>::const_iterator s = _sets.begin (); s != _sets.end (); ++s) {
+		if (slot < (int) s->macros.size () && !s->macros[slot].empty ()) {
+			used = true;
+		}
+	}
+	if (!used && slot < (int) _shortcuts.size ()) {
+		_shortcuts[slot] = Binding ();
+		apply_shortcuts ();
+	}
 	changed ();
 }
 
 void
 MacroManager::changed ()
 {
+	/* trim empty macros at the end of each set, and unused keys */
+	for (vector<MacroSet>::iterator s = _sets.begin (); s != _sets.end (); ++s) {
+		while (!s->macros.empty () && s->macros.back ().empty ()) {
+			s->macros.pop_back ();
+		}
+	}
+	while (!_shortcuts.empty () && _shortcuts.back ().key.empty () && (_shortcuts.back ().scope.empty () || _shortcuts.back ().scope == X_("Global"))) {
+		_shortcuts.pop_back ();
+	}
+
+	_cycle_position.clear ();
 	update_actions ();
+	update_menu ();
 	save ();
 	Changed (); /* EMIT SIGNAL */
 }
@@ -391,7 +579,13 @@ MacroManager::changed ()
 void
 MacroManager::update_actions ()
 {
-	for (int i = 0; i < n_slots; ++i) {
+	int needed = max ((int) min_actions, (int) _shortcuts.size ());
+	for (vector<MacroSet>::const_iterator s = _sets.begin (); s != _sets.end (); ++s) {
+		needed = max (needed, (int) s->macros.size ());
+	}
+	ensure_actions (needed);
+
+	for (int i = 0; i < _registered; ++i) {
 		Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (action_path (i), false);
 		if (!act) {
 			continue;
@@ -400,7 +594,7 @@ MacroManager::update_actions ()
 		bool const set = !m.steps.empty ();
 		act->set_label (m.name.empty () ? string_compose (_("Macro %1"), i + 1) : m.name);
 		act->set_sensitive (set);
-		/* empty slots stay out of the Macros menu */
+		/* empty macros stay out of menus */
 		act->set_visible (set);
 	}
 
@@ -412,30 +606,63 @@ MacroManager::update_actions ()
 }
 
 void
-MacroManager::apply_shortcuts ()
+MacroManager::update_menu ()
 {
-	Bindings* global = Bindings::get_bindings (X_("Global"));
-	if (!global) {
+	if (!_menus_loaded || !ActionManager::ui_manager) {
 		return;
 	}
 
-	for (int i = 0; i < n_slots; ++i) {
+	if (_merge_id) {
+		ActionManager::ui_manager->remove_ui (_merge_id);
+	}
+	_merge_id = ActionManager::ui_manager->new_merge_id ();
+
+	MacroSet const& set (current ());
+	for (size_t i = 0; i < set.macros.size (); ++i) {
+		if (set.macros[i].steps.empty ()) {
+			continue;
+		}
+		ActionManager::ui_manager->add_ui (_merge_id, X_("/Main/Macros/MacroList"), string_compose (X_("macro-%1"), i + 1), action_path (i), Gtk::UI_MANAGER_MENUITEM, false);
+	}
+	ActionManager::ui_manager->ensure_update ();
+}
+
+/* ---- keys ---- */
+
+void
+MacroManager::apply_shortcuts ()
+{
+	for (int i = 0; i < _registered; ++i) {
 		string const path = action_path (i);
+
+		for (list<Bindings*>::const_iterator b = Bindings::bindings.begin (); b != Bindings::bindings.end (); ++b) {
+			if ((*b)->is_registered (Bindings::Press, path)) {
+				(*b)->remove (Bindings::Press, path, false);
+			}
+		}
+
+		if (i >= (int) _shortcuts.size () || _shortcuts[i].key.empty ()) {
+			continue;
+		}
+
 		KeyboardKey key;
-
-		if (_shortcuts[i].empty () || !KeyboardKey::make_key (_shortcuts[i], key)) {
-			global->remove (Bindings::Press, path, false);
+		if (!KeyboardKey::make_key (_shortcuts[i].key, key)) {
 			continue;
 		}
 
-		string const conflict = key_conflict (key, i);
-		if (!conflict.empty ()) {
-			warning << string_compose (_("Macro %1 keeps no shortcut: %2"), i + 1, conflict) << endmsg;
-			global->remove (Bindings::Press, path, false);
+		Bindings* target = Bindings::get_bindings (_shortcuts[i].scope);
+		if (!target) {
+			warning << string_compose (_("Macro %1 keeps no shortcut: there are no \"%2\" key bindings"), i + 1, _shortcuts[i].scope) << endmsg;
 			continue;
 		}
 
-		global->replace (key, Bindings::Press, path, false);
+		string const holder = key_holder (key, _shortcuts[i].scope, path);
+		if (!holder.empty ()) {
+			warning << string_compose (_("Macro %1 keeps no shortcut: %2 already runs \"%3\""), i + 1, key.display_label (), action_label (holder)) << endmsg;
+			continue;
+		}
+
+		target->replace (key, Bindings::Press, path, false);
 	}
 }
 
@@ -443,54 +670,332 @@ KeyboardKey
 MacroManager::shortcut (int slot) const
 {
 	KeyboardKey key;
-	if (slot < 0 || slot >= n_slots || _shortcuts[slot].empty () || !KeyboardKey::make_key (_shortcuts[slot], key)) {
+	if (slot < 0 || slot >= (int) _shortcuts.size () || _shortcuts[slot].key.empty () || !KeyboardKey::make_key (_shortcuts[slot].key, key)) {
 		return KeyboardKey::null_key ();
 	}
 	return key;
 }
 
 string
-MacroManager::key_conflict (KeyboardKey const& key, int slot) const
+MacroManager::shortcut_scope (int slot) const
 {
-	string const mine = action_path (slot);
-
-	for (list<Bindings*>::const_iterator b = Bindings::bindings.begin (); b != Bindings::bindings.end (); ++b) {
-		string path;
-		if ((*b)->is_bound (key, Bindings::Press, &path) && path != mine) {
-			return string_compose (_("%1 is already the shortcut for \"%2\" (%3)"), key.display_label (), action_label (path), (*b)->name ());
-		}
+	if (slot < 0 || slot >= (int) _shortcuts.size () || _shortcuts[slot].scope.empty ()) {
+		return X_("Global");
 	}
-	return string ();
+	return _shortcuts[slot].scope;
 }
 
 void
-MacroManager::set_shortcut (int slot, KeyboardKey const& key)
+MacroManager::set_shortcut (int slot, KeyboardKey const& key, string const& scope)
 {
-	Bindings* global = Bindings::get_bindings (X_("Global"));
-	if (!global || slot < 0 || slot >= n_slots || !key_conflict (key, slot).empty ()) {
+	if (slot < 0 || slot >= max_macros || !Bindings::get_bindings (scope) || !key_holder (key, scope, action_path (slot)).empty ()) {
 		return;
 	}
-	global->replace (key, Bindings::Press, action_path (slot), false);
-	_shortcuts[slot] = key.name ();
+	if ((int) _shortcuts.size () <= slot) {
+		_shortcuts.resize (slot + 1);
+	}
+	_shortcuts[slot].key   = key.name ();
+	_shortcuts[slot].scope = scope;
+	update_actions ();
+	apply_shortcuts ();
+	changed ();
+}
+
+void
+MacroManager::set_shortcut_scope (int slot, string const& scope)
+{
+	if (slot < 0 || slot >= max_macros || !Bindings::get_bindings (scope)) {
+		return;
+	}
+	KeyboardKey const key = shortcut (slot);
+	if (!(key == KeyboardKey::null_key ()) && !key_holder (key, scope, action_path (slot)).empty ()) {
+		return;
+	}
+	if ((int) _shortcuts.size () <= slot) {
+		_shortcuts.resize (slot + 1);
+	}
+	_shortcuts[slot].scope = scope;
+	apply_shortcuts ();
 	changed ();
 }
 
 void
 MacroManager::clear_shortcut (int slot)
 {
-	Bindings* global = Bindings::get_bindings (X_("Global"));
-	if (!global || slot < 0 || slot >= n_slots) {
+	if (slot < 0 || slot >= (int) _shortcuts.size ()) {
 		return;
 	}
-	global->remove (Bindings::Press, action_path (slot), false);
-	_shortcuts[slot].clear ();
+	_shortcuts[slot].key.clear ();
+	apply_shortcuts ();
 	changed ();
+}
+
+string
+MacroManager::key_holder (KeyboardKey const& key, string const& scope, string const& self) const
+{
+	Bindings* b = Bindings::get_bindings (scope);
+	string path;
+	if (b && b->is_bound (key, Bindings::Press, &path) && path != self) {
+		return path;
+	}
+	return string ();
+}
+
+vector<MacroManager::KeyUse>
+MacroManager::key_uses (KeyboardKey const& key, string const& self) const
+{
+	vector<KeyUse> out;
+	for (list<Bindings*>::const_iterator b = Bindings::bindings.begin (); b != Bindings::bindings.end (); ++b) {
+		string path;
+		/* each editor's copy of a template follows the template */
+		if ((*b)->parent () || !(*b)->is_bound (key, Bindings::Press, &path) || path == self) {
+			continue;
+		}
+		KeyUse u;
+		u.set    = (*b)->name ();
+		u.action = path;
+		u.label  = slot_of (path) >= 0 ? action_label (path) : binding_label (*b, path);
+		if (u.label.empty ()) {
+			u.label = path;
+		}
+		out.push_back (u);
+	}
+	return out;
+}
+
+void
+MacroManager::take_key (KeyboardKey const& key, string const& scope, string const& self)
+{
+	string const holder = key_holder (key, scope, self);
+	if (holder.empty ()) {
+		return;
+	}
+	int const slot = slot_of (holder);
+	if (slot >= 0) {
+		if (slot < (int) _shortcuts.size ()) {
+			_shortcuts[slot].key.clear ();
+		}
+		apply_shortcuts ();
+		changed ();
+	} else {
+		set_builtin_key (scope, holder, key, KeyboardKey::null_key ());
+	}
+}
+
+vector<MacroManager::Shortcut>
+MacroManager::shortcuts () const
+{
+	vector<Shortcut> out;
+	for (list<Bindings*>::const_iterator b = Bindings::bindings.begin (); b != Bindings::bindings.end (); ++b) {
+		/* each editor's copy of a template is shown once, as the template */
+		if ((*b)->parent ()) {
+			continue;
+		}
+		string const set = (*b)->name ();
+		vector<pair<KeyboardKey, string> > keys;
+		(*b)->get_key_bindings (Bindings::Press, keys);
+		for (vector<pair<KeyboardKey, string> >::const_iterator k = keys.begin (); k != keys.end (); ++k) {
+			if (slot_of (k->second) >= 0) {
+				continue;
+			}
+			string const label = binding_label (*b, k->second);
+			if (label.empty ()) {
+				continue;
+			}
+			Shortcut s;
+			s.set      = set;
+			s.action   = k->second;
+			s.key      = k->first;
+			s.label    = label;
+			s.runnable = exists (k->second);
+			string const name = k->first.name ();
+			vector<KeyChange>::const_iterator kc = find_key_change (set, k->second, 0, &name);
+			if (kc != _key_changes.end ()) {
+				s.default_key = kc->from;
+			}
+			out.push_back (s);
+		}
+	}
+
+	/* default keys that were taken away stay listed, so they can be reset */
+	for (vector<KeyChange>::const_iterator kc = _key_changes.begin (); kc != _key_changes.end (); ++kc) {
+		Bindings const* b = Bindings::get_bindings (kc->set);
+		string const label = b ? binding_label (b, kc->action) : string ();
+		if (kc->to.empty () && !label.empty ()) {
+			Shortcut s;
+			s.set         = kc->set;
+			s.action      = kc->action;
+			s.key         = KeyboardKey::null_key ();
+			s.default_key = kc->from;
+			s.label       = label;
+			s.runnable    = exists (kc->action);
+			out.push_back (s);
+		}
+	}
+	return out;
+}
+
+vector<MacroManager::KeyChange>::iterator
+MacroManager::find_key_change (string const& set, string const& action, string const* from, string const* to)
+{
+	for (vector<KeyChange>::iterator k = _key_changes.begin (); k != _key_changes.end (); ++k) {
+		if (k->set == set && k->action == action && (!from || k->from == *from) && (!to || k->to == *to)) {
+			return k;
+		}
+	}
+	return _key_changes.end ();
+}
+
+vector<MacroManager::KeyChange>::const_iterator
+MacroManager::find_key_change (string const& set, string const& action, string const* from, string const* to) const
+{
+	for (vector<KeyChange>::const_iterator k = _key_changes.begin (); k != _key_changes.end (); ++k) {
+		if (k->set == set && k->action == action && (!from || k->from == *from) && (!to || k->to == *to)) {
+			return k;
+		}
+	}
+	return _key_changes.end ();
+}
+
+void
+MacroManager::apply_key_changes ()
+{
+	for (vector<KeyChange>::const_iterator k = _key_changes.begin (); k != _key_changes.end (); ++k) {
+		Bindings* b = Bindings::get_bindings (k->set);
+		KeyboardKey from;
+		KeyboardKey to;
+		string path;
+		if (!b) {
+			continue;
+		}
+		if (KeyboardKey::make_key (k->from, from) && b->is_bound (from, Bindings::Press, &path) && path == k->action) {
+			b->remove_key (from, Bindings::Press, false);
+		}
+		if (!k->to.empty () && KeyboardKey::make_key (k->to, to) && !b->add_key (to, Bindings::Press, k->action, false)) {
+			warning << string_compose (_("\"%1\" keeps no shortcut: %2 is taken"), action_label (k->action), to.display_label ()) << endmsg;
+		}
+	}
+}
+
+void
+MacroManager::set_builtin_key (string const& set, string const& action, KeyboardKey const& old_key, KeyboardKey const& new_key, string const& default_key)
+{
+	Bindings* b = Bindings::get_bindings (set);
+	if (!b) {
+		return;
+	}
+	bool const had = !(old_key == KeyboardKey::null_key ());
+	bool const gets = !(new_key == KeyboardKey::null_key ());
+	string const old_name = had ? old_key.name () : string ();
+	string const new_name = gets ? new_key.name () : string ();
+
+	if (old_name == new_name || (gets && !key_holder (new_key, set, action).empty ())) {
+		return;
+	}
+
+	if (had) {
+		string path;
+		if (!b->is_bound (old_key, Bindings::Press, &path) || path != action) {
+			return;
+		}
+		b->remove_key (old_key, Bindings::Press, false);
+	}
+	if (gets) {
+		b->add_key (new_key, Bindings::Press, action, false);
+	}
+
+	/* remember what this key was by default, to save it and to reset it */
+	vector<KeyChange>::iterator kc = had ? find_key_change (set, action, 0, &old_name) : find_key_change (set, action, &default_key, 0);
+	if (kc == _key_changes.end ()) {
+		if (had) {
+			KeyChange change;
+			change.set    = set;
+			change.action = action;
+			change.from   = old_name;
+			change.to     = new_name;
+			_key_changes.push_back (change);
+		}
+	} else {
+		kc->to = new_name;
+		if (kc->to == kc->from) {
+			_key_changes.erase (kc);
+		}
+	}
+
+	changed ();
+}
+
+string
+MacroManager::reset_builtin_key (string const& set, string const& action, string const& default_key)
+{
+	vector<KeyChange>::iterator kc = find_key_change (set, action, &default_key, 0);
+	Bindings* b = Bindings::get_bindings (set);
+	if (kc == _key_changes.end () || !b) {
+		return string ();
+	}
+
+	KeyboardKey from;
+	if (!KeyboardKey::make_key (kc->from, from)) {
+		_key_changes.erase (kc);
+		changed ();
+		return string ();
+	}
+
+	string const holder = key_holder (from, set, action);
+	if (!holder.empty ()) {
+		return string_compose (_("%1 now runs \"%2\". Give that another key first."), from.display_label (), action_label (holder));
+	}
+
+	KeyboardKey to;
+	string path;
+	if (!kc->to.empty () && KeyboardKey::make_key (kc->to, to) && b->is_bound (to, Bindings::Press, &path) && path == action) {
+		b->remove_key (to, Bindings::Press, false);
+	}
+	b->add_key (from, Bindings::Press, action, false);
+	_key_changes.erase (kc);
+	changed ();
+	return string ();
+}
+
+/* ---- running ---- */
+
+bool
+MacroManager::changes_nothing (Step const& s) const
+{
+	Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (s.action, false);
+	if (!act || !act->get_sensitive ()) {
+		return true;
+	}
+	Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic (act);
+	if (tact && s.mode != Run) {
+		return tact->get_active () == (s.mode == TurnOn);
+	}
+	return ARDOUR_UI::instance () && ARDOUR_UI::instance ()->shows_focused_page (s.action);
+}
+
+void
+MacroManager::run_step (Step const& s)
+{
+	Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (s.action, false);
+
+	if (!act) {
+		warning << string_compose (_("Macro step: the action %1 isn't available"), s.action) << endmsg;
+		return;
+	}
+
+	Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic (act);
+
+	if (tact && s.mode != Run) {
+		tact->set_active (s.mode == TurnOn);
+	} else {
+		act->activate ();
+	}
 }
 
 void
 MacroManager::run (int slot)
 {
-	if (slot < 0 || slot >= n_slots) {
+	if (slot < 0 || slot >= max_macros) {
 		return;
 	}
 
@@ -502,23 +1007,31 @@ MacroManager::run (int slot)
 
 	/* a copy, because a step may switch macro sets */
 	Macro const m = macro (slot);
+	size_t const n = m.steps.size ();
+
+	if (n == 0) {
+		return;
+	}
 
 	++_depth;
 
-	for (vector<Step>::const_iterator s = m.steps.begin (); s != m.steps.end (); ++s) {
-		Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (s->action, false);
+	if (m.cycle) {
+		/* one step per run: the next one that would change something */
+		map<int, size_t>::const_iterator p = _cycle_position.find (slot);
+		size_t const start = (p == _cycle_position.end ()) ? 0 : (p->second + 1) % n;
 
-		if (!act) {
-			warning << string_compose (_("Macro \"%1\": the action %2 isn't available"), m.name, s->action) << endmsg;
-			continue;
+		for (size_t k = 0; k < n; ++k) {
+			size_t const i = (start + k) % n;
+			if (changes_nothing (m.steps[i])) {
+				continue;
+			}
+			_cycle_position[slot] = i;
+			run_step (m.steps[i]);
+			break;
 		}
-
-		Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic (act);
-
-		if (tact && s->mode != Run) {
-			tact->set_active (s->mode == TurnOn);
-		} else {
-			act->activate ();
+	} else {
+		for (vector<Step>::const_iterator s = m.steps.begin (); s != m.steps.end (); ++s) {
+			run_step (*s);
 		}
 	}
 
@@ -529,7 +1042,7 @@ void
 MacroManager::start_recording (int slot)
 {
 	stop_recording ();
-	if (slot < 0 || slot >= n_slots) {
+	if (slot < 0 || slot >= max_macros) {
 		return;
 	}
 	_recording_slot = slot;
@@ -609,30 +1122,42 @@ void
 MacroManager::save () const
 {
 	XMLNode* root = new XMLNode (X_("Macros"));
-	root->set_property (X_("version"), 1);
+	root->set_property (X_("version"), 2);
 	root->set_property (X_("current-set"), current ().name);
 
-	for (int i = 0; i < n_slots; ++i) {
-		if (_shortcuts[i].empty ()) {
+	for (size_t i = 0; i < _shortcuts.size (); ++i) {
+		if (_shortcuts[i].key.empty () && (_shortcuts[i].scope.empty () || _shortcuts[i].scope == X_("Global"))) {
 			continue;
 		}
 		XMLNode* node = root->add_child (X_("Shortcut"));
-		node->set_property (X_("slot"), i + 1);
-		node->set_property (X_("key"), _shortcuts[i]);
+		node->set_property (X_("slot"), (int) i + 1);
+		node->set_property (X_("key"), _shortcuts[i].key);
+		node->set_property (X_("scope"), _shortcuts[i].scope.empty () ? string (X_("Global")) : _shortcuts[i].scope);
+	}
+
+	for (vector<KeyChange>::const_iterator k = _key_changes.begin (); k != _key_changes.end (); ++k) {
+		XMLNode* node = root->add_child (X_("KeyChange"));
+		node->set_property (X_("set"), k->set);
+		node->set_property (X_("action"), k->action);
+		node->set_property (X_("from"), k->from);
+		node->set_property (X_("to"), k->to);
 	}
 
 	for (vector<MacroSet>::const_iterator s = _sets.begin (); s != _sets.end (); ++s) {
 		XMLNode* set_node = root->add_child (X_("MacroSet"));
 		set_node->set_property (X_("name"), s->name);
 
-		for (int i = 0; i < n_slots; ++i) {
+		for (size_t i = 0; i < s->macros.size (); ++i) {
 			Macro const& m (s->macros[i]);
 			if (m.empty ()) {
 				continue;
 			}
 			XMLNode* macro_node = set_node->add_child (X_("Macro"));
-			macro_node->set_property (X_("slot"), i + 1);
+			macro_node->set_property (X_("slot"), (int) i + 1);
 			macro_node->set_property (X_("name"), m.name);
+			if (m.cycle) {
+				macro_node->set_property (X_("cycle"), true);
+			}
 
 			for (vector<Step>::const_iterator st = m.steps.begin (); st != m.steps.end (); ++st) {
 				XMLNode* step_node = macro_node->add_child (X_("Step"));

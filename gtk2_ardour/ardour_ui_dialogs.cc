@@ -1134,6 +1134,24 @@ ARDOUR_UI::focused_tabbable ()
 	return 0;
 }
 
+bool
+ARDOUR_UI::shows_focused_page (std::string const& action)
+{
+	Tabbable* page = 0;
+
+	if (action == X_("Common/show-editor")) {
+		page = editor;
+	} else if (action == X_("Common/show-mixer")) {
+		page = mixer;
+	} else if (action == X_("Common/show-trigger")) {
+		page = trigger_page;
+	} else if (action == X_("Common/show-recorder")) {
+		page = recorder;
+	}
+
+	return page && page == focused_tabbable ();
+}
+
 void
 ARDOUR_UI::toggle_fullscreen_focused_window ()
 {
