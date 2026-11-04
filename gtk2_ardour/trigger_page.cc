@@ -329,7 +329,7 @@ TriggerPage::set_state (const XMLNode& node, int version)
 	}
 
 	yn = true; // show properties by default
-	node.get_property ("show-trigger-props", yn);
+	node.get_property ("show-trigger-properties", yn);
 	{
 		Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Cues"), X_("ToggleTriggerProps"));
 		/* do it twice to force the change */
