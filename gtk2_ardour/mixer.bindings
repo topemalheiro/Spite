@@ -55,5 +55,7 @@
    <Binding key="F11" action="Mixer/recall-mixer-scene-11" group="Mixer Scenes"/>
    <Binding key="F12" action="Mixer/recall-mixer-scene-12" group="Mixer Scenes"/>
 
+    <!-- Spite: views -->
+    <Binding key="Primary-Secondary-b" action="Mixer/toggle-browser" group="Window Visibility"/>
   </Press>
  </Bindings>

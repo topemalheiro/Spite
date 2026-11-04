@@ -193,6 +193,10 @@ Editor::register_actions ()
 	show_editor_list_action->set_tooltip (_("Show/Hide Right Panel"));
 	right_attachment_button.set_related_action (show_editor_list_action);
 
+	/* Spite: browser */
+	ActionManager::register_action (editor_actions, X_("toggle-browser"), _("Editor: Show/Hide Browser"), sigc::mem_fun (*this, &Editor::toggle_browser));
+	ActionManager::register_action (editor_actions, X_("toggle-browser-side"), _("Editor: Move Browser to the Other Side"), sigc::mem_fun (*this, &Editor::toggle_browser_side));
+
 	show_editor_mixer_action = ActionManager::register_toggle_action (editor_actions, "show-editor-mixer", _("Show Editor Mixer"), sigc::mem_fun (*this, &Tabbable::att_left_button_toggled));
 	ActionManager::session_sensitive_actions.push_back (show_editor_mixer_action);
 	show_editor_mixer_action->set_tooltip (_("Show/Hide Left Panel"));

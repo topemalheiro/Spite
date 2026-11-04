@@ -68,6 +68,7 @@ using namespace std;
 TriggerPage::TriggerPage ()
 	: Tabbable (_("Cues"), X_("trigger"), NULL, true, Tabbable::PaneLayout (Tabbable::PaneRight | Tabbable::AttBottom))
 	, _cue_area_frame (0.5, 0, 1.0, 0)
+	, _plugin_browser (true)
 	, _cue_box (16, 16 * TriggerBox::default_triggers_per_box)
 	, _master_widget (16, 16)
 	, _master (_master_widget.root ())
@@ -127,6 +128,7 @@ TriggerPage::TriggerPage ()
 	target_table.push_back (Gtk::TargetEntry ("text/uri-list"));
 	target_table.push_back (Gtk::TargetEntry ("text/plain"));
 	target_table.push_back (Gtk::TargetEntry ("application/x-rootwin-drop"));
+	target_table.push_back (Gtk::TargetEntry ("x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP)); /* Spite: browser */
 	_no_strips.drag_dest_set (target_table, DEST_DEFAULT_ALL, Gdk::ACTION_COPY);
 
 	_strip_group_box.pack_start (_cue_area_frame, false, false);
@@ -141,8 +143,9 @@ TriggerPage::TriggerPage ()
 	add_sidebar_page (_("Tracks"), _("Tracks & Busses"), _trigger_route_list.widget ());
 	add_sidebar_page (_("Sources"), _("Sources"), _trigger_source_list.widget ());
 	add_sidebar_page (_("Regions"), _("Regions"), _trigger_region_list.widget ());
+	add_sidebar_page (_("Plugins"), _("Plugins"), _plugin_browser); /* Spite: browser */
 
-	_sidebar_pager2.set_index (3);
+	_sidebar_pager2.set_index (4);
 
 	/* args: no transport controls, non-expandable, single region */
 	_midi_editor = new Pianoroll (X_("MIDICueEditor"), false, false, true);
@@ -201,6 +204,10 @@ TriggerPage::TriggerPage ()
 	_no_strips.show ();
 	_sidebar_vbox.show_all ();
 	_properties_box.show();
+
+	/* Spite: browser side */
+	set_sidebar_on_left (UIConfiguration::instance ().get_cue_sidebar_on_left ());
+	UIConfiguration::instance ().ParameterChanged.connect (sigc::mem_fun (*this, &TriggerPage::ui_parameter_changed));
 
 	/* setup keybidings */
 	set_widget_bindings (contents(), *bindings, ARDOUR_BINDING_KEY);
@@ -268,6 +275,7 @@ TriggerPage::get_state () const
 	node->set_property (X_("triggerpage-sidebar-page"), _sidebar_notebook.get_current_page ());
 	node->set_property (X_("triggerpage-sidebar-btn1"), _sidebar_pager1.index ());
 	node->set_property (X_("triggerpage-sidebar-btn2"), _sidebar_pager2.index ());
+	node->set_property (X_("triggerpage-plugin-list"), (int)_plugin_browser.mode ()); /* Spite: browser */
 
 	node->add_child_nocopy (_midi_editor->get_state());
 	node->add_child_nocopy (_audio_editor->get_state());
@@ -297,6 +305,11 @@ TriggerPage::set_state (const XMLNode& node, int version)
 
 	if (node.get_property (X_("triggerpage-sidebar-btn2"), index)) {
 		_sidebar_pager2.set_index (index);
+	}
+
+	/* Spite: browser */
+	if (node.get_property (X_("triggerpage-plugin-list"), index) && index <= PluginBrowser::SearchAll) {
+		_plugin_browser.set_mode ((PluginBrowser::Mode)index);
 	}
 
 	int32_t sidebar_page;
@@ -363,6 +376,7 @@ TriggerPage::set_session (Session* s)
 	_trigger_source_list.set_session (s);
 	_trigger_region_list.set_session (s);
 	_trigger_route_list.set_session (s);
+	_plugin_browser.set_session (s);
 
 	XMLNode* node = ARDOUR_UI::instance ()->trigger_page_settings ();
 	set_state (*node, Stateful::loading_state_version);
@@ -860,6 +874,28 @@ TriggerPage::no_strip_drag_motion (Glib::RefPtr<Gdk::DragContext> const& context
 void
 TriggerPage::no_strip_drag_data_received (Glib::RefPtr<Gdk::DragContext> const& context, int /*x*/, int y, Gtk::SelectionData const& data, guint /*info*/, guint time)
 {
+	/* Spite: browser. An instrument from the Plugins page makes a MIDI track with it */
+	if (data.get_target () == "x-ardour/plugin.favorite") {
+		const void* d = data.get_data ();
+		const Gtkmm2ext::DnDTreeView<ARDOUR::PluginPresetPtr>* tv = reinterpret_cast<const Gtkmm2ext::DnDTreeView<ARDOUR::PluginPresetPtr>*> (d);
+
+		PluginPresetList nfos;
+		TreeView* source;
+		tv->get_object_drag_data (nfos, &source);
+
+		bool ok = false;
+		for (auto const& ppp : nfos) {
+			PluginInfoPtr pip = ppp->_pip;
+			if (!pip->is_instrument ()) {
+				continue;
+			}
+			ARDOUR_UI::instance ()->session_add_midi_route (true, nullptr, 1, pip->name, Config->get_strict_io (), pip, ppp->_preset.valid ? &ppp->_preset : 0, PresentationInfo::max_order, true);
+			ok = true;
+		}
+		context->drag_finish (ok, false, time);
+		return;
+	}
+
 	if (data.get_target () == "x-ardour/region.pbdid") {
 		PBD::ID rid (data.get_data_as_string ());
 		std::shared_ptr<Region> region = RegionFactory::region_by_id (rid);
@@ -1002,4 +1038,31 @@ TriggerPage::register_actions ()
 
 	ActionManager::register_action (trigger_actions, X_("stop-all-cues-now"), _("Stop all cues now"), sigc::bind (sigc::mem_fun (*ARDOUR_UI::instance(), &ARDOUR_UI::stop_all_cues), true));
 	ActionManager::register_action (trigger_actions, X_("stop-all-cues-soon"), _("Stop all cues soon"), sigc::bind (sigc::mem_fun (*ARDOUR_UI::instance(), &ARDOUR_UI::stop_all_cues), false));
+
+	/* Spite: browser */
+	ActionManager::register_action (trigger_actions, X_("toggle-browser"), _("Cue Page: Show/Hide Browser"), sigc::mem_fun (*this, &TriggerPage::toggle_browser));
+	ActionManager::register_action (trigger_actions, X_("toggle-browser-side"), _("Cue Page: Move Browser to the Other Side"), sigc::mem_fun (*this, &TriggerPage::toggle_browser_side));
+}
+
+/* Spite: browser */
+
+void
+TriggerPage::toggle_browser ()
+{
+	Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Cues"), X_("ToggleTriggerList"));
+	tact->set_active (!tact->get_active ());
+}
+
+void
+TriggerPage::toggle_browser_side ()
+{
+	UIConfiguration::instance ().set_cue_sidebar_on_left (!UIConfiguration::instance ().get_cue_sidebar_on_left ());
+}
+
+void
+TriggerPage::ui_parameter_changed (std::string const& p)
+{
+	if (p == "cue-sidebar-on-left") {
+		set_sidebar_on_left (UIConfiguration::instance ().get_cue_sidebar_on_left ());
+	}
 }

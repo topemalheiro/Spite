@@ -14,5 +14,7 @@
 
     <Binding key="Tertiary-l" action="Cues/ToggleTriggerList" group="Window Visibility"/>
     <Binding key="Tertiary-p" action="Cues/ToggleTriggerProps" group="Window Visibility"/>
+    <!-- Spite: views -->
+    <Binding key="Primary-Secondary-b" action="Cues/toggle-browser" group="Window Visibility"/>
   </Press>
 </Bindings>

@@ -228,6 +228,7 @@ gtk2_ardour_sources = [
         'pingback.cc',
         'pitch_color_dialog.cc',
         'playlist_selector.cc',
+        'plugin_browser.cc',
         'plugin_display.cc',
         'plugin_eq_gui.cc',
         'plugin_manager_ui.cc',

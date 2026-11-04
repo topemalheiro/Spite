@@ -48,6 +48,8 @@ Tabbable::Tabbable (const string& visible_name, string const & nontranslatable_n
 	, _parent_notebook (0)
 	, tab_requested_by_state (tabbed_by_default)
 	, _panelayout (pl)
+	, _attachment_table (0)
+	, _sidebar_on_left (false)
 {
 	if (w) {
 		_contents = w;
@@ -82,6 +84,7 @@ Tabbable::default_layout ()
 	bottom_attachment_button.set_name ("lock button");
 
 	Gtk::Table* atta_table = manage(new Gtk::Table);
+	_attachment_table = atta_table;
 	atta_table->set_homogeneous ();
 	atta_table->set_spacings (0);
 	atta_table->set_row_spacings (3);
@@ -464,7 +467,11 @@ Tabbable::get_state() const
 	node.set_property (X_("tabbed"),  tabbed());
 
 	if (_panelayout & PaneRight) {
-		node.set_property (string_compose("%1%2", _menu_name, X_("-rightpane-pos")).c_str(), content_right_pane.get_divider ());
+		float fract = content_right_pane.get_divider ();
+		if (_sidebar_on_left) {
+			fract = 1.f - fract;
+		}
+		node.set_property (string_compose("%1%2", _menu_name, X_("-rightpane-pos")).c_str(), fract);
 	}
 	if (_panelayout & PaneLeft) {
 		node.set_property (string_compose("%1%2", _menu_name, X_("-leftpane-pos")).c_str(), content_left_pane.get_divider ());
@@ -497,7 +504,7 @@ Tabbable::set_state (const XMLNode& node, int version)
 		float fract;
 		if ( window_node->get_property (string_compose("%1%2", _menu_name, X_("-rightpane-pos")).c_str(), fract) ) {
 			fract = std::max (.05f, std::min (.95f, fract));
-			content_right_pane.set_divider (0, fract);
+			content_right_pane.set_divider (0, _sidebar_on_left ? 1.f - fract : fract);
 		}
 		if ( window_node->get_property (string_compose("%1%2", _menu_name, X_("-leftpane-pos")).c_str(), fract) ) {
 			fract = std::max (.05f, std::min (.95f, fract));
@@ -646,3 +653,50 @@ Tabbable::should_show_att_bottom ()
 	return false;
 }
 
+/* Spite: browser side */
+
+void
+Tabbable::set_sidebar_on_left (bool yn)
+{
+	if (!(_panelayout & PaneRight) || yn == _sidebar_on_left) {
+		return;
+	}
+
+	/* content_right_pane holds [main content | list]. Re-adding the
+	 * children in the other order puts the list first, on the left.
+	 * The divider is the first child's share of the width, so flip it.
+	 */
+	float fract = content_right_pane.get_divider ();
+
+	content_right_pane.remove (content_inner_hbox);
+	content_right_pane.remove (content_right_vbox);
+
+	if (yn) {
+		content_right_pane.add (content_right_vbox);
+		content_right_pane.add (content_inner_hbox);
+	} else {
+		content_right_pane.add (content_inner_hbox);
+		content_right_pane.add (content_right_vbox);
+	}
+
+	content_right_pane.set_divider (0, 1.f - fract);
+	_sidebar_on_left = yn;
+
+	/* Pages without a left attachment show the list's button where the
+	 * list is: swap the left and right buttons and their icons.
+	 */
+	if (_attachment_table && !(_panelayout & (PaneLeft | AttLeft))) {
+		_attachment_table->remove (left_attachment_button);
+		_attachment_table->remove (right_attachment_button);
+		ArdourButton& on_left  (yn ? right_attachment_button : left_attachment_button);
+		ArdourButton& on_right (yn ? left_attachment_button : right_attachment_button);
+		_attachment_table->attach (on_left,  0, 1, 0, 1, Gtk::SHRINK, Gtk::EXPAND|Gtk::FILL, 1, 2);
+		_attachment_table->attach (on_right, 1, 2, 0, 1, Gtk::SHRINK, Gtk::EXPAND|Gtk::FILL, 1, 2);
+		on_left.set_icon (ArdourIcon::AttachmentLeft);
+		on_right.set_icon (ArdourIcon::AttachmentRight);
+		on_left.show ();
+		on_right.show ();
+	}
+
+	StateChange (*this);
+}

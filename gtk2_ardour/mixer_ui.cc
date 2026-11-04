@@ -135,7 +135,7 @@ Mixer_UI::instance ()
 
 Mixer_UI::Mixer_UI ()
 	: Tabbable (_("Mixer"), X_("mixer"), NULL, true, Profile->get_mixbus () ? Tabbable::PaneLayout (Tabbable::AttBottom | Tabbable::PaneRight) : Tabbable::PaneLeft)
-	, plugin_search_clear_button (X_("Clear"))
+	, _plugin_browser (false)
 	, _mixer_scene_release (0)
 	, no_track_list_redisplay (false)
 	, in_group_row_change (false)
@@ -147,11 +147,8 @@ Mixer_UI::Mixer_UI ()
 	, _strip_width (UIConfiguration::instance().get_default_narrow_ms() ? Narrow : Wide)
 	, _spill_scroll_position (0)
 	, ignore_track_reorder (false)
-	, ignore_plugin_refill (false)
-	, ignore_plugin_reorder (false)
 	, _in_group_rebuild_or_clear (false)
 	, _route_deletion_in_progress (false)
-	, plugin_list_mode (PLM_Favorite)
 	, _maximised (false)
 	, _strip_selection_change_without_scroll (false)
 	, _selection (*this, *this)
@@ -270,48 +267,6 @@ Mixer_UI::Mixer_UI ()
 	strip_templates_scroller.set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
 	strip_templates_vbox.pack_start (strip_templates_scroller, true, true);
 
-	/* plugin fav/preset */
-	list<TargetEntry> target_list;
-	target_list.push_back (TargetEntry ("x-ardour/plugin.preset", Gtk::TARGET_SAME_APP));
-
-	favorite_plugins_model = PluginTreeStore::create (favorite_plugins_columns);
-	favorite_plugins_display.set_model (favorite_plugins_model);
-	favorite_plugins_display.append_column (_("Favorite Plugins"), favorite_plugins_columns.name);
-	favorite_plugins_display.set_name ("EditGroupList");
-	favorite_plugins_display.get_selection()->set_mode (Gtk::SELECTION_SINGLE);
-	favorite_plugins_display.set_reorderable (false);
-	favorite_plugins_display.set_headers_visible (false);
-	favorite_plugins_display.set_rules_hint (true);
-	favorite_plugins_display.set_can_focus (false);
-	favorite_plugins_display.add_object_drag (favorite_plugins_columns.plugin.index(), "x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP);
-	favorite_plugins_display.set_drag_column (favorite_plugins_columns.name.index());
-	favorite_plugins_display.add_drop_targets (target_list);
-	favorite_plugins_display.signal_row_activated().connect (sigc::mem_fun (*this, &Mixer_UI::plugin_row_activated));
-	favorite_plugins_display.signal_button_press_event().connect (sigc::mem_fun (*this, &Mixer_UI::plugin_row_button_press), false);
-	favorite_plugins_display.signal_drop.connect (sigc::mem_fun (*this, &Mixer_UI::plugin_drop));
-	favorite_plugins_display.signal_motion.connect (sigc::mem_fun (*this, &Mixer_UI::plugin_drag_motion));
-	favorite_plugins_display.signal_row_expanded().connect (sigc::mem_fun (*this, &Mixer_UI::save_favorite_ui_state));
-	favorite_plugins_display.signal_row_collapsed().connect (sigc::mem_fun (*this, &Mixer_UI::save_favorite_ui_state));
-	if (UIConfiguration::instance().get_use_tooltips()) {
-		favorite_plugins_display.set_tooltip_column (0);
-	}
-	favorite_plugins_model->signal_row_has_child_toggled().connect (sigc::mem_fun (*this, &Mixer_UI::sync_treeview_favorite_ui_state));
-	favorite_plugins_model->signal_row_deleted().connect (sigc::mem_fun (*this, &Mixer_UI::favorite_plugins_deleted));
-
-	plugin_search_entry.signal_changed().connect (sigc::mem_fun (*this, &Mixer_UI::plugin_search_entry_changed));
-	plugin_search_clear_button.signal_clicked.connect (sigc::mem_fun (*this, &Mixer_UI::plugin_search_clear_button_clicked));
-
-	favorite_plugins_scroller.add (favorite_plugins_display);
-	favorite_plugins_scroller.set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
-
-	favorite_plugins_search_hbox.set_spacing (2);
-	favorite_plugins_search_hbox.pack_start (plugin_search_entry, true, true);
-	favorite_plugins_search_hbox.pack_start (plugin_search_clear_button, false, false);
-
-	favorite_plugins_vbox.set_spacing (3);
-	favorite_plugins_vbox.pack_start (favorite_plugins_scroller, true, true);
-	favorite_plugins_vbox.pack_start (favorite_plugins_search_hbox, false, false);
-
 	/* mixer scenes */
 	_mixer_scene_table.set_border_width(4);
 	_mixer_scene_table.set_spacings(4);
@@ -367,17 +322,18 @@ Mixer_UI::Mixer_UI ()
 	_sidebar_notebook.set_scrollable (true);
 	_sidebar_notebook.popup_disable ();
 
-	_sidebar_notebook.append_page (favorite_plugins_vbox, _("Plugins"));
+	_sidebar_notebook.append_page (_plugin_browser, _("Plugins"));
+	_plugin_browser.ModeChanged.connect ([this]() { if (_sidebar_notebook.get_current_page () == 0) { update_sidebar_pagers (0); }});
 
-	_sidebar_pager1.add_item (_("Favorite"), _("Favorite Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_Favorite); update_sidebar_pagers (0); });
-	_sidebar_pager1.add_item (_("Recent"), _("Recently Used Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_Recent); update_sidebar_pagers (0); });
-	_sidebar_pager1.add_item (_("Top-10"), _("Top-10 Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_TopHits); update_sidebar_pagers (0); });
-	_sidebar_pager1.add_item (_("Search"), _("Search All Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_SearchAll); update_sidebar_pagers (0); });
+	_sidebar_pager1.add_item (_("Favorite"), PluginBrowser::mode_name (PluginBrowser::Favorite), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::Favorite); update_sidebar_pagers (0); });
+	_sidebar_pager1.add_item (_("Recent"), PluginBrowser::mode_name (PluginBrowser::Recent), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::Recent); update_sidebar_pagers (0); });
+	_sidebar_pager1.add_item (_("Top-10"), PluginBrowser::mode_name (PluginBrowser::TopHits), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::TopHits); update_sidebar_pagers (0); });
+	_sidebar_pager1.add_item (_("Search"), PluginBrowser::mode_name (PluginBrowser::SearchAll), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::SearchAll); update_sidebar_pagers (0); });
 
-	_sidebar_pager2.add_item (_("Favorite"), _("Favorite Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_Favorite); update_sidebar_pagers (0); });
-	_sidebar_pager2.add_item (_("Recent"), _("Recently Used Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_Recent); update_sidebar_pagers (0); });
-	_sidebar_pager2.add_item (_("Top-10"), _("Top-10 Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_TopHits); update_sidebar_pagers (0); });
-	_sidebar_pager2.add_item (_("Search"), _("Search All Plugins"), [this]() {_sidebar_notebook.set_current_page (0); set_plugin_list_mode (PLM_SearchAll); update_sidebar_pagers (0); });
+	_sidebar_pager2.add_item (_("Favorite"), PluginBrowser::mode_name (PluginBrowser::Favorite), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::Favorite); update_sidebar_pagers (0); });
+	_sidebar_pager2.add_item (_("Recent"), PluginBrowser::mode_name (PluginBrowser::Recent), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::Recent); update_sidebar_pagers (0); });
+	_sidebar_pager2.add_item (_("Top-10"), PluginBrowser::mode_name (PluginBrowser::TopHits), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::TopHits); update_sidebar_pagers (0); });
+	_sidebar_pager2.add_item (_("Search"), PluginBrowser::mode_name (PluginBrowser::SearchAll), [this]() {_sidebar_notebook.set_current_page (0); _plugin_browser.set_mode (PluginBrowser::SearchAll); update_sidebar_pagers (0); });
 
 	add_sidebar_page (_("Tracks"), _("Track & Bus Visibility"), track_display_scroller);
 	add_sidebar_page (_("Groups"), _("Track & Bus Groups"), group_display_vbox);
@@ -431,10 +387,9 @@ Mixer_UI::Mixer_UI ()
 	list_vpacker.show_all();
 	group_display_button_label.show();
 	group_display_scroller.show();
-	favorite_plugins_scroller.show();
 	group_display_vbox.show();
 	strip_templates_vbox.show();
-	favorite_plugins_vbox.show_all();
+	_plugin_browser.show();
 	strip_packer.show();
 	inner_pane.show();
 	vca_scroller.show();
@@ -445,7 +400,6 @@ Mixer_UI::Mixer_UI ()
 	vca_scroller_base.show();
 	out_packer.show();
 	group_display.show();
-	favorite_plugins_display.show();
 
 	XMLNode* mnode = ARDOUR_UI::instance()->tearoff_settings (X_("monitor-section"));
 	if (mnode) {
@@ -466,12 +420,6 @@ Mixer_UI::Mixer_UI ()
 #else
 #error implement deferred Plugin-Favorite list
 #endif
-
-	PluginManager::instance ().PluginListChanged.connect (*this, invalidator (*this), std::bind (&Mixer_UI::refill_favorite_plugins, this), gui_context());
-	ARDOUR::Plugin::PresetsChanged.connect (*this, invalidator (*this), std::bind (&Mixer_UI::refill_favorite_plugins, this), gui_context());
-
-	PluginManager::instance ().PluginStatusChanged.connect (*this, invalidator (*this), std::bind (&Mixer_UI::maybe_refill_favorite_plugins, this, PLM_Favorite), gui_context());
-	PluginManager::instance ().PluginStatsChanged.connect (*this, invalidator (*this), std::bind (&Mixer_UI::maybe_refill_favorite_plugins, this, PLM_Recent), gui_context());
 }
 
 Mixer_UI::~Mixer_UI ()
@@ -1328,6 +1276,8 @@ Mixer_UI::set_session (Session* sess)
 
 	update_scene_buttons();
 
+	_plugin_browser.set_session (_session);
+
 	RefPtr<ToggleAction> surround_action = ActionManager::get_toggle_action (X_("Mixer"), "ToggleSurroundMaster");
 	Glib::RefPtr<Action> surround_export = ActionManager::get_action (X_("Main"), X_("SurroundExport"));
 
@@ -1335,13 +1285,10 @@ Mixer_UI::set_session (Session* sess)
 		surround_action->set_sensitive (false);
 		surround_export->set_sensitive (false);
 
-		PBD::Unwinder<bool> uw (ignore_plugin_reorder, true);
-		favorite_plugins_model->clear ();
 		_selection.clear ();
 		return;
 	}
 
-	refill_favorite_plugins();
 	strip_templates_changed ();
 
 	XMLNode* node = ARDOUR_UI::instance()->mixer_settings();
@@ -2663,23 +2610,6 @@ Mixer_UI::set_state (const XMLNode& node, int version)
 	}
 #endif
 
-	XMLNode plugin_order (X_("PO"));
-	if (PluginManager::instance().load_plugin_order_file (plugin_order)) {
-		favorite_ui_order.clear ();
-		const XMLNodeList& kids = plugin_order.children("PluginInfo");
-		XMLNodeConstIterator i;
-		for (i = kids.begin(); i != kids.end(); ++i) {
-			std::string unique_id;
-			if ((*i)->get_property ("unique-id", unique_id)) {
-				favorite_ui_order.push_back (unique_id);
-				if ((*i)->get_property ("expanded", yn)) {
-					favorite_ui_state[unique_id] = yn;
-				}
-			}
-		}
-		sync_treeview_from_favorite_order ();
-	}
-
 	guint index;
 	if (node.get_property (X_("mixer-sidebar-btn1"), index)) {
 		_sidebar_pager1.set_index (index);
@@ -2689,10 +2619,11 @@ Mixer_UI::set_state (const XMLNode& node, int version)
 		_sidebar_pager2.set_index (index);
 	}
 
-	if (node.get_property (X_("mixer-plugin-list"), index) && index <= PLM_SearchAll) {
-		plugin_list_mode = (PluginListMode)index;
+	PluginBrowser::Mode plm = _plugin_browser.mode ();
+	if (node.get_property (X_("mixer-plugin-list"), index) && index <= PluginBrowser::SearchAll) {
+		plm = (PluginBrowser::Mode)index;
 	}
-	set_plugin_list_mode(plugin_list_mode);
+	_plugin_browser.set_mode (plm);
 
 	int32_t sidebar_page;
 	if (node.get_property (X_("mixer-sidebar-page"), sidebar_page)) {
@@ -2712,32 +2643,9 @@ Mixer_UI::set_state (const XMLNode& node, int version)
 }
 
 void
-Mixer_UI::favorite_plugins_deleted (const TreeModel::Path&)
-{
-	if (ignore_plugin_reorder) {
-		return;
-	}
-	/* re-order is implemented by insert; delete */
-	save_plugin_order_file ();
-}
-
-void
 Mixer_UI::save_plugin_order_file ()
 {
-	store_current_favorite_order ();
-
-	XMLNode plugin_order ("PluginOrder");
-	uint32_t cnt = 0;
-	for (std::list<std::string>::const_iterator i = favorite_ui_order.begin(); i != favorite_ui_order.end(); ++i, ++cnt) {
-		XMLNode* p = new XMLNode ("PluginInfo");
-		p->set_property ("sort", cnt);
-		p->set_property ("unique-id", *i);
-		if (favorite_ui_state.find (*i) != favorite_ui_state.end ()) {
-			p->set_property ("expanded", favorite_ui_state[*i]);
-		}
-		plugin_order.add_child_nocopy (*p);
-	}
-	PluginManager::instance().save_plugin_order_file (plugin_order);
+	PluginBrowser::save_favorite_order ();
 }
 
 XMLNode&
@@ -2750,7 +2658,7 @@ Mixer_UI::get_state () const
 	node->set_property (X_("mixer-sidebar-page"), _sidebar_notebook.get_current_page ());
 	node->set_property (X_("mixer-sidebar-btn1"), _sidebar_pager1.index ());
 	node->set_property (X_("mixer-sidebar-btn2"), _sidebar_pager2.index ());
-	node->set_property (X_("mixer-plugin-list"), (int)plugin_list_mode);
+	node->set_property (X_("mixer-plugin-list"), (int)_plugin_browser.mode ());
 	node->set_property (X_("mixer-inner-pane-pos"),  inner_pane.get_divider());
 
 	node->set_property ("narrow-strips", (_strip_width == Narrow));
@@ -3187,544 +3095,16 @@ Mixer_UI::monitor_section_detached ()
 }
 
 void
-Mixer_UI::store_current_favorite_order ()
-{
-	if (plugin_list_mode != PLM_Favorite || !plugin_search_entry.get_text ().empty()) {
-		return;
-	}
-
-	typedef Gtk::TreeModel::Children type_children;
-	type_children children = favorite_plugins_model->children();
-	favorite_ui_order.clear();
-	for(type_children::iterator iter = children.begin(); iter != children.end(); ++iter)
-	{
-		Gtk::TreeModel::Row row = *iter;
-		ARDOUR::PluginPresetPtr ppp = row[favorite_plugins_columns.plugin];
-		favorite_ui_order.push_back ((*ppp->_pip).unique_id);
-		favorite_ui_state[(*ppp->_pip).unique_id] = favorite_plugins_display.row_expanded (favorite_plugins_model->get_path(iter));
-	}
-}
-
-void
-Mixer_UI::save_favorite_ui_state (const TreeModel::iterator& iter, const TreeModel::Path& path)
-{
-	Gtk::TreeModel::Row row = *iter;
-	ARDOUR::PluginPresetPtr ppp = row[favorite_plugins_columns.plugin];
-	assert (ppp);
-	favorite_ui_state[(*ppp->_pip).unique_id] = favorite_plugins_display.row_expanded (favorite_plugins_model->get_path(iter));
-}
-
-void
 Mixer_UI::update_sidebar_pagers (guint page)
 {
 	std::string label;
 	if (page == 0) {
-		switch (plugin_list_mode) {
-			case PLM_Favorite:
-				label = "Favorite Plugins";
-				break;
-			case PLM_Recent:
-				label = "Recent Plugins";
-				break;
-			case PLM_TopHits:
-				label = "Top-10 Plugins";
-				break;
-			case PLM_SearchAll:
-				label = "Search All Plugins";
-				break;
-		}
+		label = PluginBrowser::mode_name (_plugin_browser.mode ());
 	} else {
 		label = _sidebar_notebook.get_tab_label_text (*_sidebar_notebook.get_nth_page (page));
 	}
 	_sidebar_pager1.set_active (label);
 	_sidebar_pager2.set_active (label);
-}
-
-void
-Mixer_UI::set_plugin_list_mode (PluginListMode plm)
-{
-	plugin_list_mode = plm;
-
-	if (plugin_list_mode == PLM_Favorite || plugin_list_mode == PLM_SearchAll) {
-		PBD::Unwinder<bool> uw (ignore_plugin_refill, true);
-		favorite_plugins_search_hbox.show ();
-		plugin_search_entry.set_text ("");
-	} else {
-		favorite_plugins_search_hbox.hide ();
-	}
-	refill_favorite_plugins ();
-}
-
-void
-Mixer_UI::plugin_search_entry_changed ()
-{
-	if (plugin_list_mode == PLM_Favorite || plugin_list_mode == PLM_SearchAll) {
-		refill_favorite_plugins ();
-	}
-}
-
-void
-Mixer_UI::plugin_search_clear_button_clicked ()
-{
-	plugin_search_entry.set_text ("");
-}
-
-void
-Mixer_UI::refiller (PluginInfoList& result, const PluginInfoList& plugs)
-{
-	PluginManager& manager (PluginManager::instance());
-	PluginListMode plm = plugin_list_mode;
-
-	std::string searchstr = plugin_search_entry.get_text ();
-	setup_search_string (searchstr);
-
-	for (PluginInfoList::const_iterator i = plugs.begin(); i != plugs.end(); ++i) {
-		bool maybe_show = true;
-
-		if (plm == PLM_Favorite) {
-			if (manager.get_status (*i) != PluginManager::Favorite) {
-				maybe_show = false;
-			}
-
-			if (maybe_show && !searchstr.empty()) {
-				maybe_show = false;
-				/* check name */
-				std::string compstr = (*i)->name;
-				setup_search_string (compstr);
-				maybe_show |= match_search_strings (compstr, searchstr);
-				/* check tags */
-				std::string tags = manager.get_tags_as_string (*i);
-				setup_search_string (tags);
-				maybe_show |= match_search_strings (tags, searchstr);
-			}
-		} else if (plm == PLM_SearchAll) {
-			maybe_show = false;
-			if (searchstr.length() > 2) {
-				/* check name */
-				std::string compstr = (*i)->name;
-				setup_search_string (compstr);
-				maybe_show |= match_search_strings (compstr, searchstr);
-				/* check tags */
-				std::string tags = manager.get_tags_as_string (*i);
-				setup_search_string (tags);
-				maybe_show |= match_search_strings (tags, searchstr);
-			}
-		} else {
-			int64_t lru;
-			uint64_t use_count;
-			if (!manager.stats (*i, lru, use_count)) {
-				maybe_show = false;
-			}
-			if (plm == PLM_Recent && lru == 0) {
-				maybe_show = false;
-			}
-		}
-
-		if (!maybe_show) {
-			continue;
-		}
-		result.push_back (*i);
-	}
-}
-
-void
-Mixer_UI::refill_favorite_plugins ()
-{
-	if (ignore_plugin_refill) {
-		return;
-	}
-
-	PluginInfoList plugs;
-	PluginManager& mgr (PluginManager::instance());
-
-#ifdef WINDOWS_VST_SUPPORT
-	refiller (plugs, mgr.windows_vst_plugin_info ());
-#endif
-#ifdef LXVST_SUPPORT
-	refiller (plugs, mgr.lxvst_plugin_info ());
-#endif
-#ifdef MACVST_SUPPORT
-	refiller (plugs, mgr.mac_vst_plugin_info ());
-#endif
-#ifdef VST3_SUPPORT
-	refiller (plugs, mgr.vst3_plugin_info ());
-#endif
-#ifdef AUDIOUNIT_SUPPORT
-	refiller (plugs, mgr.au_plugin_info ());
-#endif
-	refiller (plugs, mgr.ladspa_plugin_info ());
-	refiller (plugs, mgr.lv2_plugin_info ());
-	refiller (plugs, mgr.lua_plugin_info ());
-
-	switch (plugin_list_mode) {
-		default:
-			/* use favorites & search all as-is */
-			break;
-		case PLM_TopHits:
-			{
-				PluginChartsSorter cmp;
-				plugs.sort (cmp);
-				plugs.resize (std::min (plugs.size(), size_t(UIConfiguration::instance().get_max_plugin_chart())));
-			}
-			break;
-		case PLM_Recent:
-			{
-				PluginRecentSorter cmp;
-				plugs.sort (cmp);
-				plugs.resize (std::min (plugs.size(), size_t(10)));
-				plugs.resize (std::min (plugs.size(), size_t(UIConfiguration::instance().get_max_plugin_recent())));
-			}
-			break;
-	}
-	plugin_list = plugs;
-
-	sync_treeview_from_favorite_order ();
-	//store_current_favorite_order ();
-}
-
-void
-Mixer_UI::maybe_refill_favorite_plugins (PluginListMode plm)
-{
-	switch (plm) {
-		case PLM_Favorite:
-			if (plugin_list_mode == PLM_Favorite) {
-				refill_favorite_plugins();
-			}
-			break;
-		default:
-			if (plugin_list_mode != PLM_Favorite) {
-				refill_favorite_plugins();
-			}
-			break;
-	}
-}
-
-void
-Mixer_UI::sync_treeview_favorite_ui_state (const TreeModel::Path& path, const TreeModel::iterator&)
-{
-	TreeIter iter;
-	if (!(iter = favorite_plugins_model->get_iter (path))) {
-		return;
-	}
-	ARDOUR::PluginPresetPtr ppp = (*iter)[favorite_plugins_columns.plugin];
-	if (!ppp) {
-		return;
-	}
-	PluginInfoPtr pip = ppp->_pip;
-	if (favorite_ui_state.find (pip->unique_id) != favorite_ui_state.end ()) {
-		if (favorite_ui_state[pip->unique_id]) {
-			favorite_plugins_display.expand_row (path, true);
-		}
-	}
-}
-
-void
-Mixer_UI::sync_treeview_from_favorite_order ()
-{
-	PBD::Unwinder<bool> uw (ignore_plugin_reorder, true);
-	switch (plugin_list_mode) {
-		case PLM_Favorite:
-			{
-				PluginUIOrderSorter cmp (favorite_ui_order);
-				plugin_list.sort (cmp);
-			}
-			break;
-		case PLM_TopHits:
-		case PLM_SearchAll:
-			{
-				PluginABCSorter cmp;
-				plugin_list.sort (cmp);
-			}
-		case PLM_Recent:
-			break;
-	}
-
-	favorite_plugins_model->clear ();
-	for (PluginInfoList::const_iterator i = plugin_list.begin(); i != plugin_list.end(); ++i) {
-		PluginInfoPtr pip = (*i);
-
-		TreeModel::Row newrow = *(favorite_plugins_model->append());
-		newrow[favorite_plugins_columns.name] = (*i)->name;
-		newrow[favorite_plugins_columns.plugin] = PluginPresetPtr (new PluginPreset(pip));
-		if (!_session) {
-			continue;
-		}
-
-		vector<ARDOUR::Plugin::PresetRecord> presets = (*i)->get_presets (true);
-		for (vector<ARDOUR::Plugin::PresetRecord>::const_iterator j = presets.begin(); j != presets.end(); ++j) {
-			if (!(*j).user) {
-				continue;
-			}
-			Gtk::TreeModel::Row child_row = *(favorite_plugins_model->append (newrow.children()));
-			child_row[favorite_plugins_columns.name] = (*j).label;
-			child_row[favorite_plugins_columns.plugin] = PluginPresetPtr (new PluginPreset(pip, &(*j)));
-		}
-		if (favorite_ui_state.find (pip->unique_id) != favorite_ui_state.end ()) {
-			if (favorite_ui_state[pip->unique_id]) {
-				favorite_plugins_display.expand_row (favorite_plugins_model->get_path(newrow), true);
-			}
-		}
-	}
-}
-
-void
-Mixer_UI::popup_note_context_menu (GdkEventButton *ev)
-{
-	using namespace Gtk::Menu_Helpers;
-
-	Gtk::Menu* m = ARDOUR_UI::instance()->shared_popup_menu ();
-	MenuList& items = m->items ();
-
-	if (_selection.axes.empty()) {
-		items.push_back (MenuElem (_("No Track/Bus is selected.")));
-	} else {
-		items.push_back (MenuElem (_("Add at the top"),
-					sigc::bind (sigc::mem_fun (*this, &Mixer_UI::add_selected_processor), AddTop)));
-		items.push_back (MenuElem (_("Add Pre-Fader"),
-					sigc::bind (sigc::mem_fun (*this, &Mixer_UI::add_selected_processor), AddPreFader)));
-		items.push_back (MenuElem (_("Add Post-Fader"),
-					sigc::bind (sigc::mem_fun (*this, &Mixer_UI::add_selected_processor), AddPostFader)));
-		items.push_back (MenuElem (_("Add at the end"),
-					sigc::bind (sigc::mem_fun (*this, &Mixer_UI::add_selected_processor), AddBottom)));
-	}
-
-	items.push_back (SeparatorElem());
-
-	items.push_back (MenuElem (_("Remove from favorites"), sigc::mem_fun (*this, &Mixer_UI::remove_selected_from_favorites)));
-
-	ARDOUR::PluginPresetPtr ppp = selected_plugin();
-	if (ppp && ppp->_preset.valid && ppp->_preset.user) {
-		// we cannot currently delete AU presets
-		if (!ppp->_pip || ppp->_pip->type != AudioUnit) {
-			items.push_back (MenuElem (_("Delete Preset"), sigc::mem_fun (*this, &Mixer_UI::delete_selected_preset)));
-		}
-	}
-
-	m->popup (ev->button, ev->time);
-}
-
-bool
-Mixer_UI::plugin_row_button_press (GdkEventButton *ev)
-{
-	if ((ev->type == GDK_BUTTON_PRESS) && (ev->button == 3)) {
-		TreeModel::Path path;
-		TreeViewColumn* column;
-		int cellx, celly;
-		if (favorite_plugins_display.get_path_at_pos ((int)ev->x, (int)ev->y, path, column, cellx, celly)) {
-			Glib::RefPtr<Gtk::TreeView::Selection> selection = favorite_plugins_display.get_selection();
-			if (selection) {
-				selection->unselect_all();
-				selection->select(path);
-			}
-			ARDOUR::PluginPresetPtr ppp = selected_plugin();
-			if (ppp) {
-				popup_note_context_menu (ev);
-			}
-		}
-	}
-	return false;
-}
-
-
-PluginPresetPtr
-Mixer_UI::selected_plugin ()
-{
-	Glib::RefPtr<Gtk::TreeView::Selection> selection = favorite_plugins_display.get_selection();
-	if (!selection) {
-		return PluginPresetPtr();
-	}
-	Gtk::TreeModel::iterator iter = selection->get_selected();
-	if (!iter) {
-		return PluginPresetPtr();
-	}
-	return (*iter)[favorite_plugins_columns.plugin];
-}
-
-void
-Mixer_UI::add_selected_processor (ProcessorPosition pos)
-{
-	ARDOUR::PluginPresetPtr ppp = selected_plugin();
-	if (ppp) {
-		add_favorite_processor (ppp, pos);
-	}
-}
-
-void
-Mixer_UI::delete_selected_preset ()
-{
-	if (!_session) {
-		return;
-	}
-	ARDOUR::PluginPresetPtr ppp = selected_plugin();
-	if (!ppp || !ppp->_preset.valid || !ppp->_preset.user) {
-		return;
-	}
-	PluginPtr plugin = ppp->_pip->load (*_session);
-	plugin->get_presets();
-	plugin->remove_preset (ppp->_preset.label);
-}
-
-void
-Mixer_UI::remove_selected_from_favorites ()
-{
-	ARDOUR::PluginPresetPtr ppp = selected_plugin();
-	if (!ppp) {
-		return;
-	}
-	PluginManager::PluginStatusType status = PluginManager::Normal;
-	PluginManager& manager (PluginManager::instance());
-
-	manager.set_status (ppp->_pip->type, ppp->_pip->unique_id, status);
-	manager.save_statuses ();
-}
-
-void
-Mixer_UI::plugin_row_activated (const TreeModel::Path& path, TreeViewColumn* column)
-{
-	TreeIter iter;
-	if (!(iter = favorite_plugins_model->get_iter (path))) {
-		return;
-	}
-	ARDOUR::PluginPresetPtr ppp = (*iter)[favorite_plugins_columns.plugin];
-	add_favorite_processor (ppp, AddPreFader); // TODO: preference?!
-}
-
-void
-Mixer_UI::add_favorite_processor (ARDOUR::PluginPresetPtr ppp, ProcessorPosition pos)
-{
-	if (!_session || _selection.axes.empty()) {
-		return;
-	}
-
-	PluginInfoPtr pip = ppp->_pip;
-	for (AxisViewSelection::iterator i = _selection.axes.begin(); i != _selection.axes.end(); ++i) {
-		std::shared_ptr<ARDOUR::Route> rt = std::dynamic_pointer_cast<ARDOUR::Route> ((*i)->stripable());
-
-		if (!rt) {
-			continue;
-		}
-
-		PluginPtr p = pip->load (*_session);
-
-		if (!p) {
-			continue;
-		}
-
-		if (ppp->_preset.valid) {
-			p->load_preset (ppp->_preset);
-		}
-
-		Route::ProcessorStreams err;
-		std::shared_ptr<Processor> processor (new PluginInsert (*_session, *rt, p));
-
-		switch (pos) {
-			case AddTop:
-				rt->add_processor_by_index (processor, 0, &err, Config->get_new_plugins_active ());
-				break;
-			case AddPreFader:
-				rt->add_processor (processor, PreFader, &err, Config->get_new_plugins_active ());
-				break;
-			case AddPostFader:
-				{
-					int idx = 0;
-					int pos = 0;
-					for (;;++idx) {
-						std::shared_ptr<Processor> np = rt->nth_processor (idx);
-						if (!np) {
-							break;
-						}
-						if (!np->display_to_user()) {
-							continue;
-						}
-						if (std::dynamic_pointer_cast<Amp> (np) && // Fader, not Trim
-								std::dynamic_pointer_cast<Amp> (np)->gain_control()->parameter().type() == GainAutomation) {
-							break;
-						}
-						++pos;
-					}
-					rt->add_processor_by_index (processor, ++pos, &err, Config->get_new_plugins_active ());
-				}
-				break;
-			case AddBottom:
-				rt->add_processor_by_index (processor, -1, &err, Config->get_new_plugins_active ());
-				break;
-		}
-	}
-}
-
-bool
-PluginTreeStore::row_drop_possible_vfunc(const Gtk::TreeModel::Path& dest, const Gtk::SelectionData& data) const
-{
-	if (data.get_target() != "GTK_TREE_MODEL_ROW") {
-		return false;
-	}
-
-	// only allow to re-order top-level items
-	TreePath src;
-	if (TreePath::get_from_selection_data (data, src)) {
-		if (src.up() && src.up()) {
-			return false;
-		}
-	}
-
-	// don't allow to drop as child-rows.
-	Gtk::TreeModel::Path _dest = dest; // un const
-	const bool is_child = _dest.up (); // explicit bool for clang
-	if (!is_child || _dest.empty ()) {
-		return true;
-	}
-	return false;
-}
-
-bool
-Mixer_UI::plugin_drag_motion (const Glib::RefPtr<Gdk::DragContext>& ctx, int x, int y, guint time)
-{
-	std::string target = favorite_plugins_display.drag_dest_find_target (ctx, favorite_plugins_display.drag_dest_get_target_list());
-
-  if (target.empty()) {
-		ctx->drag_status (Gdk::DragAction (0), time);
-    return false;
-	}
-
-	if (target == "GTK_TREE_MODEL_ROW") {
-		if (plugin_list_mode == PLM_Favorite && plugin_search_entry.get_text ().empty()) {
-			/* re-order rows */
-			ctx->drag_status (Gdk::ACTION_MOVE, time);
-			return true;
-		}
-	} else if (target == "x-ardour/plugin.preset") {
-		ctx->drag_status (Gdk::ACTION_COPY, time);
-		return true;
-	}
-
-	ctx->drag_status (Gdk::DragAction (0), time);
-	return false;
-}
-
-void
-Mixer_UI::plugin_drop (const Glib::RefPtr<Gdk::DragContext>&, const Gtk::SelectionData& data)
-{
-	if (data.get_target() != "x-ardour/plugin.preset") {
-		return;
-	}
-	if (data.get_length() != sizeof (PluginPresetPtr)) {
-		return;
-	}
-
-	const void *d = data.get_data();
-	const PluginPresetPtr ppp = *(static_cast<const PluginPresetPtr*> (d));
-
-	PluginManager::PluginStatusType status = PluginManager::Favorite;
-	PluginManager& manager (PluginManager::instance());
-
-	manager.set_status (ppp->_pip->type, ppp->_pip->unique_id, status);
-	manager.save_statuses ();
-
-	/* switch to favorite tab */
-	if (plugin_list_mode != PLM_Favorite) {
-		set_plugin_list_mode (PLM_Favorite);
-		update_sidebar_pagers (0);
-	}
 }
 
 void
@@ -3974,6 +3354,12 @@ Mixer_UI::register_actions ()
 		act->set_tooltip (_("Show/Hide Right Panel"));
 		right_attachment_button.set_related_action (act);
 	}
+
+	/* Spite: browser */
+	ActionManager::register_action (group, X_("toggle-browser"), _("Mixer: Show/Hide Browser"), [] () {
+		Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Mixer"), X_("ToggleMixerList"));
+		tact->set_active (!tact->get_active ());
+	});
 
 #ifdef MIXBUS
 	act = ActionManager::register_toggle_action (group, "ToggleMixerProps", _("Mixer: Show Properties Bottom"), sigc::mem_fun (*this, &Tabbable::att_bottom_button_toggled));

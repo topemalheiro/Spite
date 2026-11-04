@@ -264,6 +264,10 @@ This mode provides many different operations on both regions and control points,
 @gmon|Monitor Section/monitor-mono|            <@PRIMARY@><@SECONDARY@>m|monitor mono
 @gmon|Monitor Section/monitor-dim-all|          <@PRIMARY@><@TERTIARY@>m|monitor dim
 
+;; Spite: views (browser, device view, Views menu)
+
+@vis|Editor/toggle-browser|                    <@PRIMARY@><@SECONDARY@>b|show/hide browser
+
 ;; arrow keys, navigation etc.
 
 @vis|Editor/step-tracks-up|                                           Up|scroll up (step)

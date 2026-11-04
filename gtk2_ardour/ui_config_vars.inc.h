@@ -173,3 +173,7 @@ UI_CONFIG_VARIABLE (uint32_t, insert_at_position, "insert-at-position", 3)
 UI_CONFIG_VARIABLE (Editing::NoteNameDisplay, note_name_display, "note-name-display", Editing::Always)
 UI_CONFIG_VARIABLE (bool, scroll_velocity_editing, "scroll-velocity-editing", true)
 UI_CONFIG_VARIABLE (bool, no_strobe, "no-strobe", false)
+
+/* Spite: browser side (true: left, like Live's browser) */
+UI_CONFIG_VARIABLE (bool, cue_sidebar_on_left, "cue-sidebar-on-left", true)
+UI_CONFIG_VARIABLE (bool, editor_list_on_left, "editor-list-on-left", true)

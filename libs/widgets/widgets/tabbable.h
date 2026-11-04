@@ -26,6 +26,7 @@
 #include <ytkmm/image.h>
 #include <ytkmm/label.h>
 #include <ytkmm/notebook.h>
+#include <ytkmm/table.h>
 
 #include "gtkmm2ext/window_proxy.h"
 
@@ -106,6 +107,13 @@ public:
 
 	void show_att_bottom (bool);
 	bool should_show_att_bottom (); /* ought to be const */
+
+	/* Spite: browser side.
+	 * Move the right-hand list (sidebar) to the left of the main content,
+	 * or back. Only pages with a PaneRight layout can do this.
+	 */
+	void set_sidebar_on_left (bool);
+	bool sidebar_on_left () const { return _sidebar_on_left; }
 
 	bool att_left_visible () const { return content_att_left.get_visible (); }
 	bool att_right_visible () const { return content_att_right.get_visible (); }
@@ -219,6 +227,10 @@ private:
 	Gtk::Notebook* _parent_notebook;
 	bool            tab_requested_by_state;
 	PaneLayout     _panelayout;
+
+	/* Spite: browser side */
+	Gtk::Table*    _attachment_table;
+	bool           _sidebar_on_left;
 
 };
 

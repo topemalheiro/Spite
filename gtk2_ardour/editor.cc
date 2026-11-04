@@ -383,6 +383,7 @@ Editor::Editor ()
 	, _midi_inspector (nullptr)
 	, midi_inspector_scrolled_window (nullptr)
 	, xcursor (nullptr)
+	, _plugin_browser (true)
 {
 	/* we are a singleton */
 
@@ -702,6 +703,7 @@ Editor::Editor ()
 	midi_inspector_scrolled_window->set_policy (Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
 	midi_inspector_scrolled_window->add (*_midi_inspector);
 	add_notebook_page (_("MIDI Tools"), _("MIDI Tools"), *midi_inspector_scrolled_window);
+	add_notebook_page (_("Plugins"), _("Plugins"), _plugin_browser); /* Spite: browser */
 
 	_notebook_tab2.set_index (4);
 
@@ -1285,6 +1287,7 @@ Editor::set_session (Session *t)
 	_leftmost_sample = session_gui_extents().first.samples();
 
 	_trigger_clip_picker.set_session (_session);
+	_plugin_browser.set_session (_session); /* Spite: browser */
 	_application_bar.set_session (_session);
 	nudge_clock->set_session (_session);
 	_summary->set_session (_session);
@@ -2343,6 +2346,11 @@ Editor::set_state (const XMLNode& node, int version)
 		_notebook_tab2.set_index (index);
 	}
 
+	/* Spite: browser */
+	if (node.get_property (X_("editor-plugin-list"), index) && index <= PluginBrowser::SearchAll) {
+		_plugin_browser.set_mode ((PluginBrowser::Mode)index);
+	}
+
 	int32_t el_page;
 	if (node.get_property (X_("editor-list-page"), el_page)) {
 		_the_notebook.set_current_page (el_page);
@@ -2433,6 +2441,7 @@ Editor::get_state () const
 	node->set_property (X_("editor-list-page"), _the_notebook.get_current_page ());
 	node->set_property (X_("editor-list-btn1"), _notebook_tab1.index ());
 	node->set_property (X_("editor-list-btn2"), _notebook_tab2.index ());
+	node->set_property (X_("editor-plugin-list"), (int)_plugin_browser.mode ()); /* Spite: browser */
 
 	if (button_bindings) {
 		XMLNode* bb = new XMLNode (X_("Buttons"));
@@ -5677,7 +5686,24 @@ Editor::ui_parameter_changed (string parameter)
 		maybe_enable_cross_cursor ();
 	} else if (parameter == "show-region-gain") {
 		set_gain_envelope_visibility ();
+	} else if (parameter == "editor-list-on-left") {
+		/* Spite: browser side */
+		set_sidebar_on_left (UIConfiguration::instance().get_editor_list_on_left ());
 	}
+}
+
+/* Spite: browser */
+
+void
+Editor::toggle_browser ()
+{
+	show_editor_list_action->set_active (!show_editor_list_action->get_active ());
+}
+
+void
+Editor::toggle_browser_side ()
+{
+	UIConfiguration::instance().set_editor_list_on_left (!UIConfiguration::instance().get_editor_list_on_left ());
 }
 
 Gtk::Window*

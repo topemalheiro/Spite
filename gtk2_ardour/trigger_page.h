@@ -37,6 +37,7 @@
 #include "cuebox_ui.h"
 #include "fitted_canvas_widget.h"
 #include "midi_trigger_properties_box.h"
+#include "plugin_browser.h"
 #include "route_processor_selection.h"
 #include "selection_properties_box.h"
 #include "trigger_clip_picker.h"
@@ -84,6 +85,11 @@ private:
 
 	void showhide_att_bottom (bool);
 
+	/* Spite: browser */
+	void toggle_browser ();
+	void toggle_browser_side ();
+	void ui_parameter_changed (std::string const&);
+
 	void rec_state_changed ();
 	void rec_state_clicked ();
 
@@ -127,6 +133,7 @@ private:
 	TriggerSourceList         _trigger_source_list;
 	TriggerRegionList         _trigger_region_list;
 	TriggerRouteList          _trigger_route_list;
+	PluginBrowser             _plugin_browser; /* Spite: browser */
 	Gtk::HBox                  hpacker;
 
 	CueBoxWidget       _cue_box;

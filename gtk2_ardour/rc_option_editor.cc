@@ -3021,6 +3021,31 @@ RCOptionEditor::RCOptionEditor ()
 
 	add_option (_("Appearance/Mixer"), new OptionEditorBlank ());
 
+	/* Spite: layout of the pages (browser side) */
+	add_option (_("Appearance/Layout"), new OptionEditorHeading (_("Browser")));
+
+	add_option (_("Appearance/Layout"),
+	     new BoolComboOption (
+		     "cue-sidebar-on-left",
+		     _("Cue page browser (sidebar)"),
+		     _("on the left"),
+		     _("on the right"),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_cue_sidebar_on_left),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_cue_sidebar_on_left)
+		     ));
+
+	add_option (_("Appearance/Layout"),
+	     new BoolComboOption (
+		     "editor-list-on-left",
+		     _("Editor browser (list)"),
+		     _("on the left"),
+		     _("on the right"),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_editor_list_on_left),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_editor_list_on_left)
+		     ));
+
+	add_option (_("Appearance/Layout"), new OptionEditorBlank ());
+
 	add_option (_("Appearance/Application Bar"), new OptionEditorHeading (_("Main Application Toolbar Items")));
 
 	add_option (_("Appearance/Application Bar"),

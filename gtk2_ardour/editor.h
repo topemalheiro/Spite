@@ -76,6 +76,7 @@
 #include "region_selection.h"
 #include "selection_memento.h"
 #include "trigger_clip_picker.h"
+#include "plugin_browser.h"
 #include "tempo_curve.h"
 
 #include "ptformat/ptformat.h"
@@ -1032,6 +1033,11 @@ private:
 	Gtk::HBox           edit_controls_hbox;
 
 	TriggerClipPicker    _trigger_clip_picker;
+
+	/* Spite: browser */
+	PluginBrowser        _plugin_browser;
+	void toggle_browser ();
+	void toggle_browser_side ();
 
 	void control_vertical_zoom_in_all ();
 	void control_vertical_zoom_out_all ();

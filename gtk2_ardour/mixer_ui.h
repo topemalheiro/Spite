@@ -61,6 +61,7 @@
 #include "axis_provider.h"
 #include "enums.h"
 #include "monitor_section.h"
+#include "plugin_browser.h"
 #include "route_processor_selection.h"
 
 namespace ARDOUR {
@@ -77,19 +78,6 @@ class MixerGroupTabs;
 class MonitorSection;
 class SurroundStrip;
 class VCAMasterStrip;
-
-class PluginTreeStore : public Gtk::TreeStore
-{
-public:
-	static Glib::RefPtr<PluginTreeStore> create(const Gtk::TreeModelColumnRecord& columns) {
-		return Glib::RefPtr<PluginTreeStore> (new PluginTreeStore (columns));
-	}
-
-protected:
-	PluginTreeStore (const Gtk::TreeModelColumnRecord& columns) : Gtk::TreeStore (columns) {}
-	virtual bool row_draggable_vfunc (const Gtk::TreeModel::Path&) const { return true; }
-	virtual bool row_drop_possible_vfunc (const Gtk::TreeModel::Path&, const Gtk::SelectionData&) const;
-};
 
 class Mixer_UI : public ArdourWidgets::Tabbable, public PBD::ScopedConnectionList, public ARDOUR::SessionHandlePtr, public AxisViewProvider
 {
@@ -211,12 +199,8 @@ private:
 	Gtk::Label            group_display_button_label;
 	Gtk::ScrolledWindow   track_display_scroller;
 	Gtk::ScrolledWindow   group_display_scroller;
-	Gtk::ScrolledWindow   favorite_plugins_scroller;
 	Gtk::VBox             group_display_vbox;
-	Gtk::VBox             favorite_plugins_vbox;
-	Gtk::HBox             favorite_plugins_search_hbox;
-	Gtk::Entry            plugin_search_entry;
-	ArdourWidgets::ArdourButton plugin_search_clear_button;
+	PluginBrowser         _plugin_browser;
 	Gtk::VBox             strip_templates_vbox;
 	Gtk::ScrolledWindow   strip_templates_scroller;
 	ArdourWidgets::HPane  inner_pane;
@@ -305,31 +289,12 @@ private:
 	void track_list_delete (const Gtk::TreeModel::Path&);
 	void track_list_reorder (const Gtk::TreeModel::Path& path, const Gtk::TreeModel::iterator& iter, int* new_order);
 
-	void plugin_row_activated (const Gtk::TreeModel::Path& path, Gtk::TreeViewColumn* column);
-	bool plugin_row_button_press (GdkEventButton*);
-	void popup_note_context_menu (GdkEventButton*);
-	void plugin_drop (const Glib::RefPtr<Gdk::DragContext>&, const Gtk::SelectionData& data);
-	bool plugin_drag_motion (Glib::RefPtr<Gdk::DragContext> const&, int, int, guint);
-
 	void strip_templates_changed ();
 	void strip_template_drag_data_get (Glib::RefPtr<Gdk::DragContext> const&, Gtk::SelectionData&, guint, guint);
 	void strip_template_drag_begin (Glib::RefPtr<Gdk::DragContext> const&);
 	void strip_template_row_activated (const Gtk::TreeModel::Path&, Gtk::TreeViewColumn*);
 	bool strip_template_row_button_press (GdkEventButton*);
 	void apply_strip_template (std::string const&);
-
-	enum ProcessorPosition {
-		AddTop,
-		AddPreFader,
-		AddPostFader,
-		AddBottom
-	};
-
-	void add_selected_processor (ProcessorPosition);
-	void add_favorite_processor (ARDOUR::PluginPresetPtr, ProcessorPosition);
-	void remove_selected_from_favorites ();
-	void delete_selected_preset ();
-	ARDOUR::PluginPresetPtr selected_plugin ();
 
 	void initial_track_display ();
 
@@ -415,34 +380,17 @@ private:
 		Gtk::TreeModelColumn<std::string> desc;
 	};
 
-	struct PluginsDisplayModelColumns : public Gtk::TreeModel::ColumnRecord {
-		PluginsDisplayModelColumns() {
-			add (name);
-			add (plugin);
-		}
-		Gtk::TreeModelColumn<std::string> name;
-		Gtk::TreeModelColumn<ARDOUR::PluginPresetPtr> plugin;
-	};
-
-	ARDOUR::PluginInfoList plugin_list;
-
-	std::list<std::string>      favorite_ui_order;
-	std::map<std::string, bool> favorite_ui_state;
-
 	StripableDisplayModelColumns stripable_columns;
 	GroupDisplayModelColumns     group_columns;
 	StripTemplateModelColumns    strip_template_columns;
-	PluginsDisplayModelColumns   favorite_plugins_columns;
 
 	Gtk::TreeView track_display;
 	Gtk::TreeView group_display;
 	Gtk::TreeView strip_template_display;
-	Gtkmm2ext::DnDTreeView<ARDOUR::PluginPresetPtr> favorite_plugins_display;
 
 	Glib::RefPtr<Gtk::ListStore> track_model;
 	Glib::RefPtr<Gtk::ListStore> group_model;
 	Glib::RefPtr<Gtk::ListStore> strip_template_model;
-	Glib::RefPtr<PluginTreeStore> favorite_plugins_model;
 
 	bool group_display_button_press (GdkEventButton*);
 	void group_display_selection_changed ();
@@ -458,8 +406,6 @@ private:
 	void sync_presentation_info_from_treeview ();
 
 	bool ignore_track_reorder;
-	bool ignore_plugin_refill;
-	bool ignore_plugin_reorder;
 
 	void parameter_changed (std::string const &);
 	void set_route_group_activation (std::shared_ptr<ARDOUR::RouteGroup>, bool);
@@ -487,27 +433,7 @@ private:
 
 	void sync_surround_action ();
 
-	enum PluginListMode {
-		PLM_Favorite,
-		PLM_Recent,
-		PLM_TopHits,
-		PLM_SearchAll
-	};
-	enum PluginListMode plugin_list_mode;
-	void set_plugin_list_mode (PluginListMode plm);
 	void update_sidebar_pagers (guint);
-
-	void refiller (ARDOUR::PluginInfoList& result, const ARDOUR::PluginInfoList& plugs);
-	void refill_favorite_plugins ();
-	void maybe_refill_favorite_plugins (PluginListMode);
-	void store_current_favorite_order();
-
-	void plugin_search_entry_changed ();
-	void plugin_search_clear_button_clicked ();
-	void favorite_plugins_deleted (const Gtk::TreeModel::Path&);
-	void sync_treeview_from_favorite_order ();
-	void sync_treeview_favorite_ui_state (const Gtk::TreeModel::Path&, const Gtk::TreeModel::iterator&);
-	void save_favorite_ui_state (const Gtk::TreeModel::iterator& iter, const Gtk::TreeModel::Path& path);
 
 	/// true if we are in fullscreen mode
 	bool _maximised;
