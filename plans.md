@@ -9,3 +9,5 @@
    * an automation view tied to step sequencers
    * preset slots beside devices that a control-surface button can trigger
    * a coloured box showing what a control surface has mapped
+
+xx
