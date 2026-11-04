@@ -3044,6 +3044,16 @@ RCOptionEditor::RCOptionEditor ()
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_editor_list_on_left)
 		     ));
 
+	add_option (_("Appearance/Layout"), new OptionEditorHeading (_("Cue Page")));
+
+	add_option (_("Appearance/Layout"),
+	     new BoolOption (
+		     "cue-strip-show-devices",
+		     _("Show devices in the Cue page's strips (hidden: clip slots, empty space, then the mixer)"),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_cue_strip_show_devices),
+		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_cue_strip_show_devices)
+		     ));
+
 	add_option (_("Appearance/Layout"), new OptionEditorBlank ());
 
 	add_option (_("Appearance/Application Bar"), new OptionEditorHeading (_("Main Application Toolbar Items")));

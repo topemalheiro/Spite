@@ -34,6 +34,7 @@
 
 #include "widgets/tooltips.h"
 
+#include "cuebox_ui.h"
 #include "gui_thread.h"
 #include "meter_patterns.h"
 #include "mixer_ui.h"
@@ -70,11 +71,20 @@ TriggerStrip::TriggerStrip (Session* s, std::shared_ptr<ARDOUR::Route> rt)
 	, _trigger_display (*this, -1., TriggerBox::default_triggers_per_box * 16.)
 	, _panners (s)
 	, _level_meter (s)
+	, _is_master (rt->is_master ())
+	, _cue_box (0)
+	, _cue_master_widget (0)
+	, _cue_master (0)
 {
 	init ();
 	set_route (rt);
 
-	_trigger_display.set_triggerbox (rt->triggerbox ().get());
+	if (_is_master) {
+		_cue_box->set_session (s);
+		_cue_master->set_session (s);
+	} else {
+		_trigger_display.set_triggerbox (rt->triggerbox ().get());
+	}
 
 	io_changed ();
 	name_changed ();
@@ -104,6 +114,10 @@ void
 TriggerStrip::set_session (Session* s)
 {
 	RouteUI::set_session (s);
+	if (_cue_box) {
+		_cue_box->set_session (s);
+		_cue_master->set_session (s);
+	}
 	if (!s) {
 		return;
 	}
@@ -132,24 +146,58 @@ TriggerStrip::init ()
 	_name_button.set_text_ellipsize (Pango::ELLIPSIZE_END);
 	_name_button.signal_size_allocate ().connect (sigc::mem_fun (*this, &TriggerStrip::name_button_resized));
 
+	/* Spite: the master strip keeps the input and clip-record rows empty,
+	 * so its scene column and mixer line up with the tracks' rows */
+	struct RowSpacer {
+		static ArdourButton* make () {
+			ArdourButton* b = manage (new ArdourButton (ArdourButton::Text));
+			b->set_name ("mixer strip button");
+			b->set_sensitive (false);
+			b->set_text (" ");
+			b->show ();
+			return b;
+		}
+	};
+
 	/* strip layout */
 	global_vpacker.set_spacing (2);
-	global_vpacker.pack_start (input_button, Gtk::PACK_SHRINK);
+	if (_is_master) {
+		global_vpacker.pack_start (*RowSpacer::make (), Gtk::PACK_SHRINK);
+	} else {
+		global_vpacker.pack_start (input_button, Gtk::PACK_SHRINK);
+	}
 	global_vpacker.pack_start (_name_button, Gtk::PACK_SHRINK);
 
 	/* rec toggle below name */
 
-	rec_toggle_button = manage (new ArdourButton);
-	rec_toggle_button->set_name ("record enable button");
-	rec_toggle_button->set_icon (ArdourIcon::RecButton);
-	UI::instance()->set_tip (rec_toggle_button, _("Switch controls from cue launching to cue recording"), "");
-	rec_toggle_button->show ();
-	rec_toggle_button->signal_button_press_event().connect (sigc::mem_fun(*this, &TriggerStrip::rec_toggle_press), false);
-	global_vpacker.pack_start (*rec_toggle_button, Gtk::PACK_SHRINK);
+	if (_is_master) {
+		rec_toggle_button = 0;
+		global_vpacker.pack_start (*RowSpacer::make (), Gtk::PACK_SHRINK);
+	} else {
+		rec_toggle_button = manage (new ArdourButton);
+		rec_toggle_button->set_name ("record enable button");
+		rec_toggle_button->set_icon (ArdourIcon::RecButton);
+		UI::instance()->set_tip (rec_toggle_button, _("Switch controls from cue launching to cue recording"), "");
+		rec_toggle_button->show ();
+		rec_toggle_button->signal_button_press_event().connect (sigc::mem_fun(*this, &TriggerStrip::rec_toggle_press), false);
+		global_vpacker.pack_start (*rec_toggle_button, Gtk::PACK_SHRINK);
+	}
 
-	global_vpacker.pack_start (_trigger_display, Gtk::PACK_SHRINK);
-	global_vpacker.pack_start (_tmaster_widget, Gtk::PACK_SHRINK);
+	if (_is_master) {
+		/* scene launch buttons and "stop all", sized like the tracks' clip slots and stop button */
+		_cue_box = manage (new CueBoxWidget (-1., TriggerBox::default_triggers_per_box * 16.));
+		_cue_master_widget = manage (new FittedCanvasWidget (-1., 16.));
+		_cue_master = new CueMaster (_cue_master_widget->root ());
+		global_vpacker.pack_start (*_cue_box, Gtk::PACK_SHRINK);
+		global_vpacker.pack_start (*_cue_master_widget, Gtk::PACK_SHRINK);
+		_cue_box->show ();
+		_cue_master_widget->show ();
+	} else {
+		global_vpacker.pack_start (_trigger_display, Gtk::PACK_SHRINK);
+		global_vpacker.pack_start (_tmaster_widget, Gtk::PACK_SHRINK);
+	}
 	global_vpacker.pack_start (_processor_box, true, true);
+	global_vpacker.pack_start (_device_space, true, true);
 	global_vpacker.pack_start (_panners, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (mute_solo_table, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (volume_table, Gtk::PACK_SHRINK);
@@ -158,8 +206,13 @@ TriggerStrip::init ()
 	/* Mute & Solo */
 	mute_solo_table.set_homogeneous (true);
 	mute_solo_table.set_spacings (2);
-	mute_solo_table.attach (*mute_button, 0, 1, 0, 1);
-	mute_solo_table.attach (*solo_button, 1, 2, 0, 1);
+	if (_is_master) {
+		/* the master bus has no solo */
+		mute_solo_table.attach (*mute_button, 0, 2, 0, 1);
+	} else {
+		mute_solo_table.attach (*mute_button, 0, 1, 0, 1);
+		mute_solo_table.attach (*solo_button, 1, 2, 0, 1);
+	}
 
 	volume_table.attach (_level_meter, 0, 1, 0, 1);
 	/*Note: _gain_control is added in set_route */
@@ -203,13 +256,40 @@ TriggerStrip::init ()
 	int         width = rintf (110.f * scale) + 1;
 	width &= ~1;
 	set_size_request (width, -1);
+
+	/* Spite: devices can be hidden in the Cue page's strips */
+	UIConfiguration::instance ().ParameterChanged.connect (sigc::mem_fun (*this, &TriggerStrip::ui_parameter_changed));
+	update_device_visibility ();
+}
+
+/* Spite: Cue page layout */
+
+void
+TriggerStrip::ui_parameter_changed (std::string const& p)
+{
+	if (p == "cue-strip-show-devices") {
+		update_device_visibility ();
+	}
+}
+
+void
+TriggerStrip::update_device_visibility ()
+{
+	if (UIConfiguration::instance ().get_cue_strip_show_devices ()) {
+		_device_space.hide ();
+		_processor_box.show ();
+	} else {
+		/* clip slots, empty space, then the mixer at the bottom, like Live */
+		_processor_box.hide ();
+		_device_space.show ();
+	}
 }
 
 void
 TriggerStrip::check_rec_enable_sensitivity ()
 {
 	RouteUI::check_rec_enable_sensitivity ();
-	if (!_route || !_route->triggerbox()) {
+	if (!_route || !_route->triggerbox() || !rec_toggle_button) {
 		return;
 	}
 
@@ -252,7 +332,9 @@ TriggerStrip::set_route (std::shared_ptr<Route> rt)
 {
 	RouteUI::set_route (rt);
 
-	_tmaster->set_triggerbox(_route->triggerbox ());
+	if (!_is_master) {
+		_tmaster->set_triggerbox(_route->triggerbox ());
+	}
 
 	input_button.set_route (route (), this);
 	output_button.set_route (route (), this);

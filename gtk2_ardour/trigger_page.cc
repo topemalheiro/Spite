@@ -75,6 +75,8 @@ TriggerPage::TriggerPage ()
 	, _show_bottom_pane (false)
 	, _selection (*this, *this)
 	, clip_editor_column (-1)
+	, _master_strip (0)
+	, _align_queued (false)
 {
 	load_bindings ();
 	register_actions ();
@@ -131,8 +133,14 @@ TriggerPage::TriggerPage ()
 	target_table.push_back (Gtk::TargetEntry ("x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP)); /* Spite: browser */
 	_no_strips.drag_dest_set (target_table, DEST_DEFAULT_ALL, Gdk::ACTION_COPY);
 
-	_strip_group_box.pack_start (_cue_area_frame, false, false);
+	/* Spite: scenes on the right, like Live's Main track. The master strip
+	 * holds the scene column; a session without a master bus gets the
+	 * plain column instead (see set_session).
+	 */
 	_strip_group_box.pack_start (_strip_scroller, true, true);
+	_strip_group_box.pack_start (_cue_area_frame, false, false);
+	_strip_group_box.pack_start (_master_align, false, false);
+	_strip_scroller.signal_size_allocate ().connect (sigc::hide (sigc::mem_fun (*this, &TriggerPage::queue_align_master_column)));
 
 	/* sidebar */
 	_sidebar_notebook.set_show_tabs (false);
@@ -395,6 +403,20 @@ TriggerPage::set_session (Session* s)
 	TriggerBox::RegionCaptured.connect (*this, invalidator (*this), std::bind (&TriggerPage::region_captured, this, _1), gui_context());
 
 	initial_track_display ();
+
+	/* Spite: the master strip, with the scene column, on the right */
+	if (_session->master_out () && !_master_strip) {
+		_master_strip = new TriggerStrip (_session, _session->master_out ());
+		_master_strip->signal_button_release_event().connect (sigc::bind (sigc::mem_fun(*this, &TriggerPage::strip_button_release_event), _master_strip));
+		_master_align.add (*_master_strip);
+	}
+	if (_master_strip) {
+		_master_align.show ();
+		_cue_area_frame.hide ();
+	} else {
+		_master_align.hide ();
+		_cue_area_frame.show ();
+	}
 
 	_properties_box.set_session (s);
 	_audio_trig_box.set_session (s);
@@ -667,6 +689,11 @@ TriggerPage::add_routes (RouteList& rl)
 void
 TriggerPage::remove_route (TriggerStrip* ra)
 {
+	if (ra == _master_strip) {
+		/* Spite: the master strip is going away with its route */
+		_master_strip = 0;
+		return;
+	}
 	if (!_session || _session->deletion_in_progress ()) {
 		_strips.clear ();
 		return;
@@ -735,6 +762,9 @@ TriggerPage::axis_view_by_stripable (std::shared_ptr<Stripable> s) const
 		if (s == strip->stripable ()) {
 			return strip;
 		}
+	}
+	if (_master_strip && s == _master_strip->stripable ()) {
+		return _master_strip;
 	}
 	return 0;
 }
@@ -1004,6 +1034,9 @@ TriggerPage::fast_update_strips ()
 		for (list<TriggerStrip*>::iterator i = _strips.begin (); i != _strips.end (); ++i) {
 			(*i)->fast_update ();
 		}
+		if (_master_strip) {
+			_master_strip->fast_update ();
+		}
 	}
 }
 
@@ -1019,6 +1052,10 @@ TriggerPage::register_actions ()
 
 	act = ActionManager::register_toggle_action (trigger_actions, "ToggleTriggerProps", _("Cue Page: Show Properties Bottom"), sigc::mem_fun (*this, &Tabbable::att_bottom_button_toggled));
 	bottom_attachment_button.set_related_action (act);
+
+	/* Spite: hide the strips' device lists, leaving clip slots, empty space and the mixer */
+	act = ActionManager::register_toggle_action (trigger_actions, "ToggleStripDevices", _("Cue Page: Show Devices in Strips"), sigc::mem_fun (*this, &TriggerPage::toggle_strip_devices));
+	Glib::RefPtr<ToggleAction>::cast_dynamic (act)->set_active (UIConfiguration::instance ().get_cue_strip_show_devices ());
 
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot-alt", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
@@ -1070,5 +1107,60 @@ TriggerPage::ui_parameter_changed (std::string const& p)
 {
 	if (p == "cue-sidebar-on-left") {
 		set_sidebar_on_left (UIConfiguration::instance ().get_cue_sidebar_on_left ());
+	} else if (p == "cue-strip-show-devices") {
+		/* keep the toggle in step when the preference changes */
+		Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Cues"), X_("ToggleStripDevices"));
+		const bool yn = UIConfiguration::instance ().get_cue_strip_show_devices ();
+		if (tact && tact->get_active () != yn) {
+			tact->set_active (yn);
+		}
+	}
+}
+
+/* Spite: Cue page layout */
+
+void
+TriggerPage::toggle_strip_devices ()
+{
+	Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Cues"), X_("ToggleStripDevices"));
+	UIConfiguration::instance ().set_cue_strip_show_devices (tact->get_active ());
+}
+
+void
+TriggerPage::queue_align_master_column ()
+{
+	if (_align_queued) {
+		return;
+	}
+	_align_queued = true;
+	Glib::signal_idle ().connect (sigc::bind_return (sigc::mem_fun (*this, &TriggerPage::align_master_column), false));
+}
+
+void
+TriggerPage::align_master_column ()
+{
+	_align_queued = false;
+
+	/* The strips sit inside the scroller's viewport, below its frame and
+	 * above the horizontal scrollbar. The master column is outside the
+	 * scroller, so pad it by the same amounts to line its rows up with the
+	 * strips' rows.
+	 */
+	Gtk::Widget* vp = _strip_scroller.get_child ();
+	if (!vp || !vp->get_realized ()) {
+		return;
+	}
+
+	Gtk::Allocation sa = _strip_scroller.get_allocation ();
+	Gtk::Allocation va = vp->get_allocation ();
+	const int frame = vp->get_style ()->get_ythickness ();
+
+	const int top    = std::max (0, va.get_y () - sa.get_y () + frame);
+	const int bottom = std::max (0, (sa.get_y () + sa.get_height ()) - (va.get_y () + va.get_height ()) + frame);
+
+	guint t, b, l, r;
+	_master_align.get_padding (t, b, l, r);
+	if ((int)t != top || (int)b != bottom) {
+		_master_align.set_padding (top, bottom, 0, 0);
 	}
 }

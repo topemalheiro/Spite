@@ -41,6 +41,8 @@
 #include "route_ui.h"
 #include "triggerbox_ui.h"
 
+class CueBoxWidget;
+class CueMaster;
 class PluginSelector;
 class TriggerMaster;
 
@@ -65,6 +67,10 @@ public:
 	void fast_update ();
 
 	TriggerBoxWidget & triggerbox_widget() { return _trigger_display; }
+
+	/* Spite: the master bus strip shows the scene launch column in
+	 * place of clip slots, like Live's Main track */
+	bool is_master_strip () const { return _is_master; }
 
 	static PBD::Signal<void(TriggerStrip*)> CatchDeletion;
 
@@ -142,6 +148,16 @@ private:
 	std::shared_ptr<AutomationController> _gain_control;
 
 	Gtk::Menu* _route_ops_menu;
+
+	/* Spite: Cue page layout */
+	void ui_parameter_changed (std::string const&);
+	void update_device_visibility ();
+
+	bool                _is_master;
+	Gtk::EventBox       _device_space; /* empty space in place of the device list */
+	CueBoxWidget*       _cue_box;      /* master strip: scene launch column */
+	FittedCanvasWidget* _cue_master_widget;
+	CueMaster*          _cue_master;
 };
 
 #endif /* __ardour_trigger_strip__ */

@@ -177,3 +177,6 @@ UI_CONFIG_VARIABLE (bool, no_strobe, "no-strobe", false)
 /* Spite: browser side (true: left, like Live's browser) */
 UI_CONFIG_VARIABLE (bool, cue_sidebar_on_left, "cue-sidebar-on-left", true)
 UI_CONFIG_VARIABLE (bool, editor_list_on_left, "editor-list-on-left", true)
+
+/* Spite: Cue page layout */
+UI_CONFIG_VARIABLE (bool, cue_strip_show_devices, "cue-strip-show-devices", true)

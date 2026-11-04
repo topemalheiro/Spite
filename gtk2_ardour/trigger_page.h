@@ -90,6 +90,11 @@ private:
 	void toggle_browser_side ();
 	void ui_parameter_changed (std::string const&);
 
+	/* Spite: Cue page layout */
+	void toggle_strip_devices ();
+	void queue_align_master_column ();
+	void align_master_column ();
+
 	void rec_state_changed ();
 	void rec_state_clicked ();
 
@@ -157,5 +162,10 @@ private:
 	std::list<TriggerStrip*> _strips;
 	sigc::connection         _fast_screen_update_connection;
 	int                       clip_editor_column;
+
+	/* Spite: the master strip, with the scene column, on the right like Live's Main track */
+	TriggerStrip*  _master_strip;
+	Gtk::Alignment _master_align;
+	bool           _align_queued;
 };
 

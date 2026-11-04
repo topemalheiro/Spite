@@ -670,6 +670,7 @@
       <separator/>
       <menuitem action='ToggleTriggerList'/>
       <menuitem action='ToggleTriggerProps'/>
+      <menuitem action='ToggleStripDevices'/>
 
       <separator/>
       <menuitem action='ToggleMixerList'/>
