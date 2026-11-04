@@ -148,6 +148,12 @@ CueEntry::_size_allocate (ArdourCanvas::Rect const& alloc)
 	int cx = (width-jump_text->text_width())/2;
 	int cy = (0.5+height-jump_text->text_height())/2;
 
+	/* Spite: in the master strip the column is as wide as a track: the
+	 * scene number sits after the launch button, like Live's scene names */
+	if (width >= 3 * height) {
+		cx = height + 3 * scale;
+	}
+
 	jump_text->set_position ( Duple(cx,cy) );
 	jump_text->set_size_request ( width, height );
 }
