@@ -1528,6 +1528,7 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("replace_processor", &Route::replace_processor)
 		.addFunction ("reorder_processors", &Route::reorder_processors)
 		.addFunction ("the_instrument", &Route::the_instrument)
+		.addFunction ("triggerbox", &Route::triggerbox) /* Spite: clip launcher */
 		.addFunction ("n_inputs", &Route::n_inputs)
 		.addFunction ("n_outputs", &Route::n_outputs)
 		.addFunction ("input", &Route::input)
@@ -2222,6 +2223,11 @@ LuaBindings::common (lua_State* L)
 
 		.deriveWSPtrClass <SoloSafeControl, SlavableAutomationControl> ("SoloSafeControl")
 		.addFunction ("solo_safe", &SoloSafeControl::solo_safe)
+		.endClass ()
+
+		/* Spite: the clip launcher, for scripts that build ready-to-play sets */
+		.deriveWSPtrClass <TriggerBox, Processor> ("TriggerBox")
+		.addFunction ("set_from_path", &TriggerBox::set_from_path)
 		.endClass ()
 
 		.deriveWSPtrClass <Amp, Processor> ("Amp")
