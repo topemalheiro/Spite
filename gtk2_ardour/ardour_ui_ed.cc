@@ -808,6 +808,8 @@ ARDOUR_UI::install_dependent_actions ()
 
 	ActionManager::register_toggle_action (common_actions, X_("ToggleMaximalEditor"), _("Maximise Editor Space"), sigc::mem_fun (*this, &ARDOUR_UI::toggle_editing_space));
 	ActionManager::register_toggle_action (common_actions, X_("ToggleMaximalMixer"), _("Maximise Mixer Space"), sigc::mem_fun (*this, &ARDOUR_UI::toggle_mixer_space));
+	ActionManager::register_action (common_actions, X_("toggle-fullscreen-window"), _("Fullscreen Focused Window"), sigc::mem_fun (*this, &ARDOUR_UI::toggle_fullscreen_focused_window));
+	ActionManager::register_action (common_actions, X_("toggle-bottom-pane"), _("Show/Hide Bottom Panel"), sigc::mem_fun (*this, &ARDOUR_UI::toggle_focused_bottom_pane));
 }
 
 void

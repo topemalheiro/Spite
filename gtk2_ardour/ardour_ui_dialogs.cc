@@ -1042,6 +1042,29 @@ bool
 ARDOUR_UI::tabbed_window_state_event_handler (GdkEventWindowState* ev, void* object)
 {
 #ifndef __APPLE__
+	/* Windows also go fullscreen through Fullscreen Focused Window and the
+	 * window manager, so keep the View menu's maximise toggles in step.
+	 * Setting a toggle to the window's current state changes nothing else.
+	 */
+	if (ev->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
+		bool const fullscreen = ev->new_window_state & GDK_WINDOW_STATE_FULLSCREEN;
+		Gtk::Window* editor_window = editor ? editor->current_toplevel () : 0;
+
+		if (editor_window && editor_window->get_window () && editor_window->get_window ()->gobj () == ev->window) {
+			Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Common/ToggleMaximalEditor"), false);
+			if (tact && tact->get_active () != fullscreen) {
+				tact->set_active (fullscreen);
+			}
+		}
+
+		if (mixer && !mixer->tabbed () && mixer->own_window () && mixer->own_window ()->get_window () && mixer->own_window ()->get_window ()->gobj () == ev->window) {
+			Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Common/ToggleMaximalMixer"), false);
+			if (tact && tact->get_active () != fullscreen) {
+				tact->set_active (fullscreen);
+			}
+		}
+	}
+
 	if (object == editor) {
 
 		if ((ev->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) &&
@@ -1085,6 +1108,54 @@ ARDOUR_UI::toggle_mixer_space()
 		mixer->maximise_mixer_space ();
 	} else {
 		mixer->restore_mixer_space ();
+	}
+}
+
+/* A detached page whose window has focus, otherwise the main window's current tab. */
+Tabbable*
+ARDOUR_UI::focused_tabbable ()
+{
+	Tabbable* const pages[] = { editor, mixer, trigger_page, recorder };
+
+	for (Tabbable* t : pages) {
+		if (t && !t->tabbed () && t->window_visible () && t->own_window ()->property_has_toplevel_focus ()) {
+			return t;
+		}
+	}
+
+	Gtk::Widget* current = _tabs.get_nth_page (_tabs.get_current_page ());
+
+	for (Tabbable* t : pages) {
+		if (t && t->tabbed () && current == &t->contents ()) {
+			return t;
+		}
+	}
+
+	return 0;
+}
+
+void
+ARDOUR_UI::toggle_fullscreen_focused_window ()
+{
+	Tabbable* t = focused_tabbable ();
+	Gtk::Window* win = (t && !t->tabbed ()) ? t->own_window () : &_main_window;
+	Glib::RefPtr<Gdk::Window> gdk_window = win->get_window ();
+
+	/* Go by the window's real state: the window manager can change it too. */
+	if (gdk_window && (gdk_window->get_state () & Gdk::WINDOW_STATE_FULLSCREEN)) {
+		win->unfullscreen ();
+	} else {
+		win->fullscreen ();
+	}
+}
+
+void
+ARDOUR_UI::toggle_focused_bottom_pane ()
+{
+	Tabbable* t = focused_tabbable ();
+
+	if (t) {
+		t->show_att_bottom (!t->should_show_att_bottom ());
 	}
 }
 void

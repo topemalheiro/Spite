@@ -544,6 +544,8 @@
     </menu>
 
     <menu name='View' action = 'View'>
+      <menuitem action='toggle-fullscreen-window'/>
+      <menuitem action='toggle-bottom-pane'/>
       <menuitem action='ToggleMaximalEditor'/>
       <menuitem action='ToggleMaximalMixer'/>
 

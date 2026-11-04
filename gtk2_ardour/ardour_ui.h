@@ -279,6 +279,8 @@ public:
 	void new_midi_tracer_window ();
 	void toggle_editing_space();
 	void toggle_mixer_space();
+	void toggle_fullscreen_focused_window ();
+	void toggle_focused_bottom_pane ();
 	void toggle_keep_tearoffs();
 	void show_plugin_manager();
 	void show_lua_window();
@@ -468,6 +470,7 @@ private:
 	void button_change_tabbable_visibility (ArdourWidgets::Tabbable*);
 	void key_change_tabbable_visibility (ArdourWidgets::Tabbable*);
 	void toggle_editor_and_mixer ();
+	ArdourWidgets::Tabbable* focused_tabbable ();
 
 	void tabbable_state_change (ArdourWidgets::Tabbable&);
 

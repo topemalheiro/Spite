@@ -214,7 +214,7 @@ This mode provides many different operations on both regions and control points,
 @edit|EditorEditing/toggle-follow-playhead|                 <@PRIMARY@>f|toggle playhead tracking
 @edit|EditorEditing/toggle-stationary-playhead|            <@TERTIARY@>f|toggle stationary playhead
 @rop|Region/show-rhythm-ferret|                           <@SECONDARY@>f|show rhythm ferret window 
-@wvis|Common/ToggleMaximalEditor|              <@PRIMARY@><@SECONDARY@>f|maximise editor space
+@wvis|Common/toggle-fullscreen-window|         <@PRIMARY@><@SECONDARY@>f|fullscreen the focused window
 @wvis|Common/ToggleMaximalMixer|                <@PRIMARY@><@TERTIARY@>f|maximise mixer space
 @mmode|Editing/set-mouse-mode-object|                                   g|object mode
 @edit|Editor/group-selected-regions|                        <@PRIMARY@>g|group selected regions
@@ -229,6 +229,7 @@ This mode provides many different operations on both regions and control points,
 @wvis|Window/toggle-locations|                            <@SECONDARY@>l|toggle locations dialog
 @edit|Editor/show-editor-list|                             <@TERTIARY@>l|show editor list
 @edit|Editor/find-and-display-stripable|        <@PRIMARY@><@TERTIARY@>l|find and display track/bus
+@wvis|Common/toggle-bottom-pane|               <@PRIMARY@><@SECONDARY@>l|show or hide the focused page's bottom panel
 
 ;; BOTTOM ROW
 
