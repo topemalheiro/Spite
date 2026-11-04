@@ -152,6 +152,10 @@ RoutePropertiesBox::RoutePropertiesBox ()
 
 	pack_start (_insert_frame, false, false, 4);
 	pack_start (_scroller, true, true);
+	pack_start (_empty_label, true, true);
+	_empty_label.set_no_show_all ();
+	_empty_label.set_alignment (0.5, 0.5);
+	_empty_label.set_size_request (-1, 160 * std::max<float> (1.f, UIConfiguration::instance ().get_ui_scale ()));
 	show_all();
 
 	ARDOUR_UI::instance()->ActionsReady.connect_same_thread (_forever_connections, std::bind (&RoutePropertiesBox::ui_actions_ready, this));
@@ -269,6 +273,26 @@ RoutePropertiesBox::update_processor_box_visibility ()
 		set_size_request (-1, -1);
 	}
 #endif
+
+	update_empty_label ();
+}
+
+void
+RoutePropertiesBox::update_empty_label ()
+{
+	/* nothing to show: say so, rather than collapsing to an empty strip */
+	if (_proc_uis.empty () && !_insert_frame.get_visible () && !_empty_label.get_text ().empty ()) {
+		_empty_label.show ();
+	} else {
+		_empty_label.hide ();
+	}
+}
+
+void
+RoutePropertiesBox::set_empty_text (std::string const& text)
+{
+	_empty_label.set_text (text);
+	update_empty_label ();
 }
 
 void

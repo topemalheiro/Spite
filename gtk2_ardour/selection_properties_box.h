@@ -53,6 +53,11 @@ public:
 
 	void set_session (ARDOUR::Session*);
 
+	/* text shown when nothing selected has properties to show, and when the
+	 * selected track has no plugins to show; empty for none
+	 */
+	void set_empty_text (std::string const& nothing, std::string const& bare_track);
+
 private:
 	void init ();
 	void selection_changed ();
@@ -70,6 +75,7 @@ private:
 	RegionFxPropertiesBox* _region_fx_box;
 	DispositionMask _disposition;
 	Pianoroll*              _pianoroll;
+	Gtk::Label             _empty_label;
 
 	PBD::ScopedConnection _region_connection;
 	PBD::ScopedConnection _editor_connection;

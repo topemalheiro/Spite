@@ -204,6 +204,7 @@ TriggerPage::TriggerPage ()
 	_no_strips.show ();
 	_sidebar_vbox.show_all ();
 	_properties_box.show();
+	_properties_box.set_empty_text (_("No clip selected."), _("No clip selected. This track has no plugins yet."));
 
 	/* Spite: browser side */
 	set_sidebar_on_left (UIConfiguration::instance ().get_cue_sidebar_on_left ());
@@ -259,11 +260,11 @@ TriggerPage::showhide_att_bottom (bool yn)
 
 	_show_bottom_pane = yn;
 
-	if (!_show_bottom_pane) {
-		Tabbable::showhide_att_bottom (false);
-	} else if (!Editor::instance ().get_selection ().triggers.empty ()) {
-		Tabbable::showhide_att_bottom (true);
+	/* with no clip selected the pane opens anyway and says so, like Live */
+	if (_show_bottom_pane) {
+		hpacker.show ();
 	}
+	Tabbable::showhide_att_bottom (_show_bottom_pane);
 }
 
 XMLNode&
@@ -587,6 +588,11 @@ TriggerPage::selection_changed ()
 
 	if (selection.triggers.empty ()) {
 		hpacker.set_child_packing (_properties_box, true, true);
+		/* the properties box says "No clip selected." or shows the selected track */
+		hpacker.show ();
+		if (_show_bottom_pane) {
+			Tabbable::showhide_att_bottom (true);
+		}
 		return;
 	}
 

@@ -70,6 +70,7 @@ SelectionPropertiesBox::SelectionPropertiesBox (DispositionMask mask)
 	pack_start(*_route_prop_box, true, true, 0);
 	pack_start(*_slot_prop_box, true, true, 0);
 	pack_start(_region_editor_box, true, true, 0);
+	pack_start(_empty_label, true, true, 0);
 
 	_time_info_box->set_no_show_all ();
 	_route_prop_box->set_no_show_all ();
@@ -79,6 +80,21 @@ SelectionPropertiesBox::SelectionPropertiesBox (DispositionMask mask)
 
 	_time_info_box->hide ();
 	_route_prop_box->hide ();
+
+	_empty_label.set_no_show_all ();
+	_empty_label.set_alignment (0.5, 0.5);
+	_empty_label.set_size_request (-1, 160 * UIConfiguration::instance ().get_ui_scale ());
+	_empty_label.hide ();
+}
+
+void
+SelectionPropertiesBox::set_empty_text (std::string const& nothing, std::string const& bare_track)
+{
+	_empty_label.set_text (nothing);
+	if (nothing.empty ()) {
+		_empty_label.hide ();
+	}
+	_route_prop_box->set_empty_text (bare_track);
 }
 
 SelectionPropertiesBox::~SelectionPropertiesBox ()
@@ -179,6 +195,7 @@ SelectionPropertiesBox::selection_changed ()
 		_time_info_box->hide ();
 		_route_prop_box->hide ();
 		_slot_prop_box->hide ();
+		_empty_label.hide ();
 		delete_region_editor ();
 		return;
 	}
@@ -315,6 +332,14 @@ SelectionPropertiesBox::selection_changed ()
 		_time_info_box->show ();
 	} else {
 		_time_info_box->hide ();
+	}
+
+	/* say so, rather than showing an empty strip */
+	bool const nothing = !_slot_prop_box->get_visible () && !_route_prop_box->get_visible () && !_region_editor_box.get_visible () && !_time_info_box->get_visible ();
+	if (nothing && !_empty_label.get_text ().empty ()) {
+		_empty_label.show ();
+	} else {
+		_empty_label.hide ();
 	}
 }
 

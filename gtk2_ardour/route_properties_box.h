@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <ytkmm/box.h>
+#include <ytkmm/label.h>
 #include <ytkmm/scrolledwindow.h>
 
 #include "ardour/ardour.h"
@@ -47,12 +48,15 @@ public:
 
 	void set_session (ARDOUR::Session*);
 	void set_route (std::shared_ptr<ARDOUR::Route>, bool force = false);
+	/* shown instead of an empty strip when the track has no plugins; empty for none */
+	void set_empty_text (std::string const&);
 
 private:
 	void property_changed (const PBD::PropertyChange& what_changed);
 	void map_frozen ();
 	void ui_actions_ready ();
 	void update_processor_box_visibility ();
+	void update_empty_label ();
 	void session_going_away ();
 	void drop_route ();
 	void drop_plugin_uis ();
@@ -65,6 +69,7 @@ private:
 
 	Gtk::ScrolledWindow _scroller;
 	Gtk::HBox           _box;
+	Gtk::Label          _empty_label;
 
 	std::shared_ptr<ARDOUR::Route> _route;
 	std::vector <GenericPluginUI*> _proc_uis;

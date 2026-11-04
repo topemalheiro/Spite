@@ -541,6 +541,7 @@ Editor::Editor ()
 
 	_bottom_hbox.pack_start (*_properties_box, true, true);
 	_properties_box->show ();
+	_properties_box->set_empty_text (_("Nothing selected."), _("This track has no plugins yet."));
 
 	/* these are static location signals */
 
