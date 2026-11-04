@@ -103,6 +103,7 @@
 #include "location_ui.h"
 #include "lua_script_manager.h"
 #include "luawindow.h"
+#include "macro_editor.h"
 #include "plugin_dspload_window.h"
 #include "plugin_manager_ui.h"
 #include "rc_option_editor.h"
@@ -127,6 +128,7 @@ class KeyEditor;
 class LocationUIWindow;
 class LuaScriptManager;
 class LuaWindow;
+class MacroEditor;
 class RCOptionEditor;
 class RouteParams_UI;
 class SessionOptionEditor;
@@ -689,6 +691,7 @@ private:
 	WM::Proxy<EngineControl> audio_midi_setup;
 	WM::Proxy<ExportVideoDialog> export_video_dialog;
 	WM::Proxy<LuaScriptManager> lua_script_window;
+	WM::Proxy<MacroEditor> macro_editor_window;
 	WM::Proxy<IdleOMeter> idleometer;
 	WM::Proxy<IOPluginWindow> io_plugin_window;
 	WM::Proxy<PluginManagerUI> plugin_manager_ui;

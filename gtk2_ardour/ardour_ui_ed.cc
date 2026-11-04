@@ -68,6 +68,7 @@
 #include "meter_patterns.h"
 #include "meterbridge.h"
 #include "keyeditor.h"
+#include "macro_manager.h"
 #include "luawindow.h"
 #include "mixer_ui.h"
 #include "recorder_ui.h"
@@ -181,6 +182,7 @@ ARDOUR_UI::install_actions ()
 	ActionManager::register_action (main_menu_actions, X_("TriggerMenu"), _("Cue Grid"));
 	ActionManager::register_action (main_menu_actions, X_("DetachMenu"), _("Detach"));
 	ActionManager::register_action (main_menu_actions, X_("Help"), _("Help"));
+	ActionManager::register_action (main_menu_actions, X_("MacrosMenu"), _("Macros"));
 	ActionManager::register_action (main_menu_actions, X_("KeyMouseActions"), _("Misc. Shortcuts"));
 	ActionManager::register_action (main_menu_actions, X_("AudioFileFormat"), _("Audio File Format"));
 	ActionManager::register_action (main_menu_actions, X_("AudioFileFormatHeader"), _("File Type"));
@@ -570,6 +572,9 @@ ARDOUR_UI::install_actions ()
 	act = ActionManager::register_action (midi_actions, X_("panic"), _("Panic (Send MIDI all-notes-off)"), sigc::mem_fun(*this, &ARDOUR_UI::midi_panic));
 	ActionManager::session_sensitive_actions.push_back (act);
 	ActionManager::transport_sensitive_actions.push_back (act);
+
+	MacroManager::instance ().register_actions ();
+	MacroManager::instance ().load ();
 }
 
 void

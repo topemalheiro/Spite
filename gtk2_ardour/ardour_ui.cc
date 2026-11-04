@@ -157,6 +157,7 @@
 #include "location_ui.h"
 #include "lua_script_manager.h"
 #include "luawindow.h"
+#include "macro_editor.h"
 #include "main_clock.h"
 #include "missing_plugin_dialog.h"
 #include "mixer_ui.h"
@@ -315,6 +316,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, audio_midi_setup (X_("audio-midi-setup"), _("Audio/MIDI Setup"))
 	, export_video_dialog (X_("video-export"), _("Video Export Dialog"))
 	, lua_script_window (X_("script-manager"), _("Script Manager"))
+	, macro_editor_window (X_("macro-editor"), _("Macro Editor"))
 	, idleometer (X_("idle-o-meter"), _("Idle'o'Meter"))
 	, io_plugin_window (X_("io-plugins"), _("I/O Plugins"))
 	, plugin_manager_ui (X_("plugin-manager"), _("Plugin Manager"))
@@ -497,6 +499,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 		rtawindow.set_state (*ui_xml, 0);
 		export_video_dialog.set_state (*ui_xml, 0);
 		lua_script_window.set_state (*ui_xml, 0);
+		macro_editor_window.set_state (*ui_xml, 0);
 		idleometer.set_state (*ui_xml, 0);
 		io_plugin_window.set_state (*ui_xml, 0);
 		plugin_manager_ui.set_state (*ui_xml, 0);
@@ -520,6 +523,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	WM::Manager::instance().register_window (&audio_midi_setup);
 	WM::Manager::instance().register_window (&export_video_dialog);
 	WM::Manager::instance().register_window (&lua_script_window);
+	WM::Manager::instance().register_window (&macro_editor_window);
 	WM::Manager::instance().register_window (&bundle_manager);
 	WM::Manager::instance().register_window (&location_ui);
 	WM::Manager::instance().register_window (&big_clock_window);
