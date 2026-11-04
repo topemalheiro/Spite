@@ -134,6 +134,7 @@ ProcessorUIFrame::save_state () const
 RoutePropertiesBox::RoutePropertiesBox ()
 	: _insert_box (nullptr)
 	, _show_insert (false)
+	, _always_show_insert (false)
 	, _idle_refill_processors_id (-1)
 {
 	_scroller.set_policy (Gtk::POLICY_AUTOMATIC, Gtk::POLICY_NEVER);
@@ -258,15 +259,18 @@ RoutePropertiesBox::map_frozen ()
 void
 RoutePropertiesBox::update_processor_box_visibility ()
 {
-	_show_insert = !ActionManager::get_toggle_action (X_("Editor"), X_("show-editor-mixer"))->get_active ();
-	if (!_show_insert || _proc_uis.empty ()) {
+	_show_insert = _always_show_insert || !ActionManager::get_toggle_action (X_("Editor"), X_("show-editor-mixer"))->get_active ();
+	if (!_show_insert || (_proc_uis.empty () && !_always_show_insert)) {
 		_insert_frame.hide ();
 	} else {
 		_insert_frame.show ();
 	}
 
 #ifndef MIXBUS
-	if (_show_insert || !_proc_uis.empty ()) {
+	if (_always_show_insert) {
+		/* Spite: as tall as the device list, like Live's device view */
+		set_size_request (-1, -1);
+	} else if (_show_insert || !_proc_uis.empty ()) {
 		float ui_scale = std::max<float> (1.f, UIConfiguration::instance().get_ui_scale());
 		set_size_request (-1, 365 * ui_scale); // match with SelectionPropertiesBox
 	} else {
@@ -285,6 +289,15 @@ RoutePropertiesBox::update_empty_label ()
 		_empty_label.show ();
 	} else {
 		_empty_label.hide ();
+	}
+}
+
+void
+RoutePropertiesBox::set_always_show_insert_list (bool yn)
+{
+	_always_show_insert = yn;
+	if (_route) {
+		update_processor_box_visibility ();
 	}
 }
 
