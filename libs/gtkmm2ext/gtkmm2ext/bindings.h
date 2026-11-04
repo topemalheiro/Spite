@@ -145,6 +145,12 @@ class LIBGTKMM2EXT_API Bindings {
 	bool is_bound (KeyboardKey const&, Operation, std::string* path = 0) const;
 	std::string bound_name (KeyboardKey const&, Operation) const;
 	bool is_registered (Operation op, std::string const& action_name) const;
+	/* every key bound for this operation, with its action name */
+	void get_key_bindings (Operation, std::vector<std::pair<KeyboardKey, std::string> >&) const;
+	/* remove one key, whatever it runs */
+	bool remove_key (KeyboardKey const&, Operation, bool can_save);
+	/* add a key even if the action already has another key; fails if the key is taken */
+	bool add_key (KeyboardKey const&, Operation, std::string const& action_name, bool can_save);
 
 	KeyboardKey get_binding_for_action (Glib::RefPtr<Gtk::Action>, Operation& op);
 

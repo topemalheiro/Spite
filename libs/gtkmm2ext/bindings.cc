@@ -1214,6 +1214,46 @@ Bindings::is_registered (Operation op, std::string const& action_name) const
 	return std::find_if(km.begin(),  km.end(),  ActionNameRegistered<KeybindingMap::const_iterator::value_type>(action_name)) != km.end();
 }
 
+bool
+Bindings::remove_key (KeyboardKey const& kb, Operation op, bool can_save)
+{
+	KeybindingMap& kbm = get_keymap (op);
+	KeybindingMap::iterator k = kbm.find (kb);
+	if (k == kbm.end ()) {
+		return false;
+	}
+	kbm.erase (k);
+	if (can_save) {
+		Keyboard::keybindings_changed ();
+	}
+	BindingsChanged (this); /* EMIT SIGNAL */
+	return true;
+}
+
+bool
+Bindings::add_key (KeyboardKey const& kb, Operation op, std::string const& action_name, bool can_save)
+{
+	KeybindingMap& kbm = get_keymap (op);
+	if (kbm.find (kb) != kbm.end ()) {
+		return false;
+	}
+	kbm.insert (make_pair (kb, ActionInfo (action_name)));
+	if (can_save) {
+		Keyboard::keybindings_changed ();
+	}
+	BindingsChanged (this); /* EMIT SIGNAL */
+	return true;
+}
+
+void
+Bindings::get_key_bindings (Operation op, std::vector<std::pair<KeyboardKey, std::string> >& out) const
+{
+	const KeybindingMap& km = get_keymap (op);
+	for (KeybindingMap::const_iterator k = km.begin (); k != km.end (); ++k) {
+		out.push_back (std::make_pair (k->first, k->second.action_name));
+	}
+}
+
 Bindings::KeybindingMap&
 Bindings::get_keymap (Operation op)
 {
