@@ -49,7 +49,7 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 
 Spite is written in C++17 on Ardour's code base, with Ardour's own copy of the GTK2 toolkit (in `libs/tk`), the waf build system and Lua scripting. plugdata, in the `plugdata` folder, is a separate C++ project built with CMake, on JUCE and Pure Data. Spite builds the way Ardour does, so Ardour's guides at <https://ardour.org/development.html> apply too.
 
-Spite reads its version from git, so clone the repository instead of downloading a ZIP, and don't make a shallow clone:
+Install git and your system's build dependencies first, as shown for each system below. Then clone the repository. Spite reads its version from git, so clone it instead of downloading a ZIP, and don't make a shallow clone:
 
 ```sh
 git clone https://github.com/topemalheiro/Spite.git
@@ -58,75 +58,99 @@ cd Spite
 
 Spite builds without plugdata. To get plugdata as well, add `--recurse-submodules` to the clone, or run `git submodule update --init --recursive` later. plugdata and its libraries take about 2 GB.
 
-### Linux (tested on Arch Linux)
+The first build compiles about 1,800 files: a few minutes on a many-core desktop, half an hour or more on a laptop. Later builds only recompile what changed.
 
-Install the build dependencies:
+### Linux (tested on Arch Linux and Debian 13)
+
+Arch Linux (with PipeWire, put `pipewire-jack` in place of `jack2`):
 
 ```sh
-# Arch Linux
 sudo pacman -S --needed base-devel git python pkgconf boost glib2 glibmm libsigc++ cairo cairomm pango pangomm fontconfig libpng libjpeg-turbo libx11 libxext libxrandr libxinerama libxi libsndfile flac libogg libsamplerate fftw curl libarchive liblo taglib vamp-plugin-sdk rubberband aubio libxml2 liblrdf lv2 serd sord sratom lilv alsa-lib libpulse jack2 libusb systemd-libs libwebsockets dbus readline
+```
 
-# Debian 13 or Ubuntu 24.04
+Debian 13 or Ubuntu 24.04:
+
+```sh
+sudo apt update
 sudo apt install build-essential git python3 pkgconf libboost-dev libglib2.0-dev libglibmm-2.4-dev libsigc++-2.0-dev libcairo2-dev libcairomm-1.0-dev libpango1.0-dev libpangomm-1.4-dev libfontconfig-dev libpng-dev libjpeg-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libsndfile1-dev libflac-dev libogg-dev libsamplerate0-dev libfftw3-dev libcurl4-openssl-dev libarchive-dev liblo-dev libtag1-dev vamp-plugin-sdk librubberband-dev libaubio-dev libxml2-dev liblrdf0-dev lv2-dev libserd-dev libsord-dev libsratom-dev liblilv-dev libasound2-dev libpulse-dev libjack-jackd2-dev libusb-1.0-0-dev libudev-dev libwebsockets-dev libdbus-1-dev libreadline-dev
+```
 
-# Fedora
+Fedora:
+
+```sh
 sudo dnf install gcc-c++ git python3 boost-devel libjpeg-devel fontconfig-devel libXi-devel libXinerama-devel 'pkgconfig(alsa)' 'pkgconfig(aubio)' 'pkgconfig(cairo)' 'pkgconfig(cairomm-1.0)' 'pkgconfig(dbus-1)' 'pkgconfig(fftw3f)' 'pkgconfig(flac)' 'pkgconfig(giomm-2.4)' 'pkgconfig(glib-2.0)' 'pkgconfig(glibmm-2.4)' 'pkgconfig(jack)' 'pkgconfig(libarchive)' 'pkgconfig(libcurl)' 'pkgconfig(liblo)' 'pkgconfig(libpulse)' 'pkgconfig(libusb-1.0)' 'pkgconfig(libwebsockets)' 'pkgconfig(libxml-2.0)' 'pkgconfig(lilv-0)' 'pkgconfig(lrdf)' 'pkgconfig(lv2)' 'pkgconfig(ogg)' 'pkgconfig(pangoft2)' 'pkgconfig(pangomm-1.4)' 'pkgconfig(readline)' 'pkgconfig(rubberband)' 'pkgconfig(samplerate)' 'pkgconfig(serd-0)' 'pkgconfig(sigc++-2.0)' 'pkgconfig(sndfile)' 'pkgconfig(sord-0)' 'pkgconfig(sratom-0)' 'pkgconfig(taglib)' 'pkgconfig(vamp-hostsdk)' 'pkgconfig(vamp-sdk)' 'pkgconfig(x11)' 'pkgconfig(xext)' 'pkgconfig(xrandr)' 'pkgconfig(libpng)' 'pkgconfig(libudev)'
 ```
 
-On Arch with PipeWire, leave `jack2` out of the list and keep `pipewire-jack`.
-
-Then build Spite and install it for your user under `~/.local`, with its own settings, apart from any Ardour:
+Then build Spite and install it for your user, under `~/.local` and apart from any Ardour. Run the script as yourself, not with sudo:
 
 ```sh
 ./install-spite.sh
-spite9
+~/.local/bin/spite9
 ```
 
-The script also adds Spite to the application menu. To build and run Spite without installing it:
+The script also adds Spite to the application menu, and once `~/.local/bin` is on your PATH, `spite9` is enough. To update, run `git pull` and the script again. Spite keeps its settings in `~/.config/spite9`. At its first start it may warn about a limit on locked memory: that's the usual setup for realtime audio, and on Arch, installing `realtime-privileges` and joining the `realtime` group lifts it.
+
+To run Spite straight from the clone without installing it, build it with the script's settings, so you can still install later:
 
 ```sh
-./waf configure --optimize --cxx17 --with-backends=jack,alsa,pulseaudio,dummy
-./waf -j"$(nproc)"
+python3 ./waf configure --prefix="$HOME/.local" --optimize --cxx17 --with-backends=jack,alsa,pulseaudio,dummy
+python3 ./waf -j"$(nproc)"
 ./gtk2_ardour/ardev
 ```
+
+After `./install-spite.sh`, `./gtk2_ardour/ardev` works on its own. To uninstall, run `python3 ./waf uninstall` in the clone, then `rm ~/.local/share/applications/spite9.desktop ~/.local/share/icons/hicolor/*/apps/spite9.png`. Your settings stay in `~/.config/spite9`.
 
 ### macOS (not yet tested with Spite)
 
-Spite should build the way Ardour does: install Xcode's command-line tools and the dependencies listed above, then run
+Ardour's macOS guide, <https://ardour.org/building_osx_native.html>, builds the dependencies from source. Homebrew has them too, though Ardour doesn't support building with it. This route is untested; for JACK and control surfaces, add `jack libusb libwebsockets` to the `brew install` line:
 
 ```sh
-./waf configure --optimize
-./waf
+xcode-select --install
+brew install git pkgconf boost pangomm@2.46 libarchive lilv rubberband vamp-plugin-sdk aubio liblo taglib fftw jpeg-turbo
+# clone Spite as above, then in the clone:
+export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"
+python3 ./waf configure --optimize --also-include="$(brew --prefix)/include" --also-libdir="$(brew --prefix)/lib"
+python3 ./waf
 ./gtk2_ardour/ardev
 ```
 
-Ardour's macOS guide, <https://ardour.org/building_osx_native.html>, builds the dependencies from source. Most of them are also in Homebrew, which Ardour doesn't support for building.
+Spite keeps its settings in `~/Library/Preferences/Spite9`.
 
 ### Windows (not yet tested with Spite)
 
-Ardour's own Windows builds are cross-compiled on Linux with MinGW (`tools/x-win/compile.sh`), against a set of dependencies that Ardour doesn't publish. Building natively in MSYS2's MINGW64 shell has been [reported to work for Ardour 9](https://discourse.ardour.org/t/building-ardour-on-windows-using-msys2/112412):
+Ardour's own Windows builds are cross-compiled on Linux with MinGW (`tools/x-win/compile.sh`), against dependencies that Ardour doesn't publish. Building natively with MSYS2 has been [reported to work for Ardour 9](https://discourse.ardour.org/t/building-ardour-on-windows-using-msys2/112412). That report used MSYS2's MINGW64 environment, which MSYS2 is retiring, so use UCRT64: install MSYS2 from <https://www.msys2.org>, open "MSYS2 UCRT64" from the Start menu, and install git and the libraries there:
 
 ```sh
-pacman -S mingw-w64-x86_64-{toolchain,boost,glib2,glibmm,libsndfile,curl,libarchive,liblo,taglib,vamp-plugin-sdk,rubberband,aubio,cairomm,pangomm,jack2,serd,sord,sratom,lilv,libwebsockets,libusb}
-./waf configure --dist-target=mingw --prefix=/c/Spite --configdir=share --no-execstack --no-dr-mingw --optimize --cxx17
-./waf
-./waf install
+pacman -Syu
+pacman -S --needed git mingw-w64-ucrt-x86_64-{toolchain,boost,glib2,glibmm,libsndfile,curl,libarchive,liblo,taglib,vamp-plugin-sdk,rubberband,aubio,cairomm,pangomm,jack2,serd,sord,sratom,lilv,libwebsockets,libusb}
 ```
+
+Then clone Spite in the same shell, and in the clone:
+
+```sh
+python3 ./waf configure --dist-target=mingw --prefix=/c/Spite --configdir=share --no-execstack --no-dr-mingw --optimize --cxx17
+python3 ./waf
+python3 ./waf install
+/c/Spite/lib/spite9/ardour-*.exe
+```
+
+Start it from the same shell, because from File Explorer it can't find MSYS2's libraries. Spite keeps its settings in `%LOCALAPPDATA%\Spite9`.
 
 Automated builds on macOS and Windows are next, so these two sections can be checked and fixed.
 
 ### plugdata with Detective Mode
 
-plugdata builds on Linux, macOS and Windows with CMake 3.22 or newer. Its dependencies and options are in [plugdata/README.md](plugdata/README.md). A quick build, which skips sfizz, Gem and ffmpeg:
+plugdata builds on Linux, macOS and Windows with CMake 3.22 or newer, and a fresh clone of it builds on Linux as shown here. Its dependencies and options are in [plugdata's README](https://github.com/topemalheiro/plugdata/blob/debug-mode-visualizer/README.md). A quick build, which skips sfizz, Gem and ffmpeg:
 
 ```sh
 git submodule update --init --recursive
 cd plugdata
 cmake -B build -DQUICK_BUILD=1
-cmake --build build
+cmake --build build --parallel 8
+cmake --install build --prefix ~/.local
 ```
 
-It builds the plugdata app and its plugins, including VST3 and LV2 versions that Spite can load.
+The build puts the plugdata app and its plugins in `plugdata/Plugins`. On Linux, the last step copies the VST3 and LV2 plugins to `~/.vst3` and `~/.lv2`, where Spite finds them, and the app to `~/.local/bin/plugdata`; then use Scan for Plugins in Spite's Preferences, under Plugins. On macOS and Windows, `cmake --install` puts them in the system's plugin folders, which needs admin rights.
 
 ## Credit and licence
 
