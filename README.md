@@ -47,7 +47,7 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 
 ## Credit and licence
 
-Spite is built on Ardour, created by Paul Davis and the Ardour community, and it keeps Ardour's full history and copyright notices. Ardour is licensed under the **GNU General Public License, version 2 or later** (see [COPYING](COPYING)), and so is Spite. All changes here are released under the same licence, and the source stays open.
+Spite is built on Ardour, created by Paul Davis and the Ardour community, and it keeps Ardour's full history and copyright notices. Ardour is licensed under the **GNU General Public License, version 2 or later** (see [LICENSE](LICENSE)), and so is Spite. Ardour's note on how its licence relates to plugins is kept in [PLUGIN-CLARIFICATION.txt](PLUGIN-CLARIFICATION.txt). All changes here are released under the same licence, and the source stays open.
 
 Ardour's own documentation and build instructions are at <https://ardour.org/development.html>. The original `README` is kept as it was.
 
