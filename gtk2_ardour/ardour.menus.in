@@ -670,6 +670,9 @@
       <separator/>
       <menuitem action='ToggleTriggerList'/>
       <menuitem action='ToggleTriggerProps'/>
+      <menuitem action='show-clip-view'/>
+      <menuitem action='show-device-view'/>
+      <menuitem action='toggle-clip-device-view'/>
       <menuitem action='ToggleStripDevices'/>
 
       <separator/>

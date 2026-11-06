@@ -31,6 +31,7 @@
 
 #include "pbd/compose.h"
 #include "pbd/error.h"
+#include "pbd/file_utils.h"
 #include "pbd/xml++.h"
 
 #include "ardour/filesystem_paths.h"
@@ -240,10 +241,14 @@ MacroManager::load ()
 	string const path = filename ();
 	XMLTree tree;
 	string current_name;
+	int version = 1;
+	bool from_file = false;
 
 	if (Glib::file_test (path, Glib::FILE_TEST_EXISTS) && tree.read (path) && tree.root ()) {
 		XMLNode const& root (*tree.root ());
 		root.get_property (X_("current-set"), current_name);
+		root.get_property (X_("version"), version);
+		from_file = true;
 
 		for (XMLNodeConstIterator c = root.children ().begin (); c != root.children ().end (); ++c) {
 			XMLNode const& node (**c);
@@ -326,10 +331,100 @@ MacroManager::load ()
 		}
 	}
 
+	/* files from before version 3 get the Cue page's Clip/Device switch
+	 * once, in the first number of the current set that is free and has
+	 * no key
+	 */
+	bool migrated = false;
+	if (from_file && version < 3 && !has_clip_device_macro ()) {
+		vector<Macro> const& macros (current ().macros);
+		int slot = 0;
+		while (slot < max_macros && ((slot < (int) macros.size () && !macros[slot].empty ()) || (slot < (int) _shortcuts.size () && !_shortcuts[slot].key.empty ()))) {
+			++slot;
+		}
+		if (slot < max_macros) {
+			add_clip_device_macro (slot);
+			migrated = true;
+		}
+	}
+
 	apply_key_changes ();
 	update_actions ();
 	apply_shortcuts ();
 	update_menu ();
+
+	if (migrated) {
+		/* keep the file as it was, once */
+		string const backup = path + X_(".v2.bak");
+		if (!Glib::file_test (backup, Glib::FILE_TEST_EXISTS) && !PBD::copy_file (path, backup)) {
+			warning << string_compose (_("Could not keep a copy of %1 as %2"), path, backup) << endmsg;
+		}
+		save ();
+	}
+}
+
+MacroManager::Macro
+MacroManager::clip_device_macro ()
+{
+	Macro m;
+	m.name  = _("Clip and Device");
+	m.cycle = true;
+	m.steps.push_back (Step (X_("Cues/show-device-view"), TurnOn));
+	m.steps.push_back (Step (X_("Cues/show-clip-view"), TurnOn));
+	return m;
+}
+
+bool
+MacroManager::has_clip_device_macro () const
+{
+	for (vector<MacroSet>::const_iterator s = _sets.begin (); s != _sets.end (); ++s) {
+		for (vector<Macro>::const_iterator m = s->macros.begin (); m != s->macros.end (); ++m) {
+			for (vector<Step>::const_iterator st = m->steps.begin (); st != m->steps.end (); ++st) {
+				if (st->action == X_("Cues/show-device-view") || st->action == X_("Cues/toggle-clip-device-view")) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+void
+MacroManager::add_clip_device_macro (int slot)
+{
+	if (slot < 0 || slot >= max_macros) {
+		return;
+	}
+
+	vector<Macro>& macros (current ().macros);
+	if ((int) macros.size () <= slot) {
+		macros.resize (slot + 1);
+	}
+	macros[slot] = clip_device_macro ();
+
+	/* Tab, on the Cue page only, unless something there already has it */
+	KeyboardKey tab;
+	if (!KeyboardKey::make_key (X_("Tab"), tab)) {
+		return;
+	}
+
+	bool taken = !key_holder (tab, X_("Cues"), action_path (slot)).empty ();
+	for (size_t i = 0; i < _shortcuts.size (); ++i) {
+		if ((int) i != slot && _shortcuts[i].key == tab.name () && _shortcuts[i].scope == X_("Cues")) {
+			taken = true;
+		}
+	}
+
+	if (taken) {
+		warning << string_compose (_("Macro %1 (\"%2\") gets no key: Tab is already used on the Cue page"), slot + 1, macros[slot].name) << endmsg;
+		return;
+	}
+
+	if ((int) _shortcuts.size () <= slot) {
+		_shortcuts.resize (slot + 1);
+	}
+	_shortcuts[slot].key   = tab.name ();
+	_shortcuts[slot].scope = X_("Cues");
 }
 
 void
@@ -372,6 +467,9 @@ MacroManager::seed_starter_set ()
 
 	_sets.push_back (set);
 	_current = 0;
+
+	/* macro 5: Tab switches the Cue page between Clip and Device view */
+	add_clip_device_macro (4);
 }
 
 MacroManager::MacroSet&
@@ -1122,7 +1220,7 @@ void
 MacroManager::save () const
 {
 	XMLNode* root = new XMLNode (X_("Macros"));
-	root->set_property (X_("version"), 2);
+	root->set_property (X_("version"), 3); /* 3: has the Cue page's Clip/Device switch */
 	root->set_property (X_("current-set"), current ().name);
 
 	for (size_t i = 0; i < _shortcuts.size (); ++i) {

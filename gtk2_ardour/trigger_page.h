@@ -39,6 +39,7 @@
 #include "midi_trigger_properties_box.h"
 #include "plugin_browser.h"
 #include "route_processor_selection.h"
+#include "route_properties_box.h"
 #include "selection_properties_box.h"
 #include "trigger_clip_picker.h"
 #include "trigger_region_list.h"
@@ -95,6 +96,24 @@ private:
 	void queue_align_master_column ();
 	void align_master_column ();
 
+	/* Spite: the bottom panel shows either the selected clip (Clip view)
+	 * or the selected track's devices side by side (Device view), like Live
+	 */
+	enum BottomMode {
+		ClipMode,
+		DeviceMode
+	};
+
+	void set_bottom_mode (BottomMode, bool by_user);
+	void bottom_mode_action (BottomMode);
+	void toggle_clip_device_view ();
+	void refresh_bottom ();
+	void show_clip_view ();
+	void show_device_view ();
+	void update_device_view ();
+	std::shared_ptr<ARDOUR::Route> device_route () const;
+	void strip_name_clicked (GdkEventButton*, TriggerStrip*);
+
 	void rec_state_changed ();
 	void rec_state_clicked ();
 
@@ -150,6 +169,13 @@ private:
 	SelectionPropertiesBox    _properties_box;
 	AudioTriggerPropertiesBox _audio_trig_box;
 	MidiTriggerPropertiesBox _midi_trig_box;
+
+	/* Spite: Device view */
+	BottomMode                   _bottom_mode;
+	bool                         _setting_bottom_mode;
+	RoutePropertiesBox           _device_box;
+	Gtk::Label                   _device_empty_label;
+	std::weak_ptr<ARDOUR::Route> _device_route_hint;
 
 #if REGION_PROPERTIES_BOX_TODO
 	AudioRegionOperationsBox  _audio_ops_box;

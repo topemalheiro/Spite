@@ -723,6 +723,14 @@ TriggerStrip::name_button_resized (Gtk::Allocation& alloc)
 bool
 TriggerStrip::name_button_press (GdkEventButton* ev)
 {
+	/* Spite: like clicking a track's title in Live */
+	if (ev->button == 1 && !NameClicked.empty ()) {
+		if (ev->type == GDK_BUTTON_PRESS) {
+			NameClicked (ev); /* EMIT SIGNAL */
+		}
+		return true;
+	}
+
 	if (ev->button == 1 || ev->button == 3) {
 		delete _route_ops_menu;
 		build_route_ops_menu ();

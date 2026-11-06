@@ -190,6 +190,10 @@ private:
 	MacroSet*       find_set (std::string const&);
 
 	void seed_starter_set ();
+	/* the Cue page's Clip/Device switch, cycled with Tab there */
+	static Macro clip_device_macro ();
+	bool has_clip_device_macro () const;
+	void add_clip_device_macro (int slot);
 	void ensure_actions (int count);
 	void update_actions ();
 	void update_menu ();

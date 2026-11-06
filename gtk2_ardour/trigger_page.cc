@@ -25,6 +25,7 @@
 #include <ytkmm/label.h>
 
 #include "pbd/properties.h"
+#include "pbd/unwind.h"
 
 #include "gtkmm2ext/gtk_ui.h"
 #include "gtkmm2ext/keyboard.h"
@@ -37,6 +38,7 @@
 #include "ardour/midi_region.h"
 #include "ardour/midi_track.h"
 #include "ardour/region_factory.h"
+#include "ardour/selection.h"
 #include "ardour/profile.h"
 #include "ardour/smf_source.h"
 #include "ardour/stripable.h"
@@ -73,6 +75,10 @@ TriggerPage::TriggerPage ()
 	, _master_widget (16, 16)
 	, _master (_master_widget.root ())
 	, _show_bottom_pane (false)
+	  /* Spite: tracks' devices show in the Device view, not here */
+	, _properties_box (SelectionPropertiesBox::DispositionMask (SelectionPropertiesBox::ShowRegions | SelectionPropertiesBox::ShowTriggers))
+	, _bottom_mode (ClipMode)
+	, _setting_bottom_mode (false)
 	, _selection (*this, *this)
 	, clip_editor_column (-1)
 	, _master_strip (0)
@@ -178,6 +184,17 @@ TriggerPage::TriggerPage ()
 	hpacker.pack_start (_midi_trig_box, false, false);
 	hpacker.pack_start (_audio_trig_box, false, false);
 	hpacker.set_no_show_all ();
+
+	/* Spite: Device view, the selected track's devices side by side with
+	 * its device list, like Live's Device View
+	 */
+	_device_box.set_always_show_insert_list (true);
+	_device_box.set_no_show_all ();
+	_device_empty_label.set_text (_("No track selected. Click a track's name to see its devices."));
+	_device_empty_label.set_alignment (0.5, 0.5);
+	_device_empty_label.set_no_show_all ();
+	hpacker.pack_start (_device_box, true, true);
+	hpacker.pack_start (_device_empty_label, true, true);
 
 	_sidebar_notebook.signal_switch_page().connect ([this](GtkNotebookPage*, guint page) {
 			std::string label (_sidebar_notebook.get_tab_label_text (*_sidebar_notebook.get_nth_page (page)));
@@ -295,6 +312,9 @@ TriggerPage::get_state () const
 	act = ActionManager::get_toggle_action ("Cues", "ToggleTriggerProps");
 	node->set_property ("show-trigger-properties", act->get_active ());
 
+	/* Spite: Clip or Device view */
+	node->set_property (X_("bottom-mode"), std::string (_bottom_mode == DeviceMode ? X_("device") : X_("clip")));
+
 	return *node;
 }
 
@@ -359,6 +379,12 @@ TriggerPage::set_state (const XMLNode& node, int version)
 		tact->set_active (yn);
 	}
 
+	/* Spite: Clip or Device view */
+	std::string mode;
+	if (node.get_property (X_("bottom-mode"), mode)) {
+		set_bottom_mode (mode == X_("device") ? DeviceMode : ClipMode, false);
+	}
+
 	return Tabbable::set_state (node, version);
 }
 
@@ -377,6 +403,9 @@ TriggerPage::set_session (Session* s)
 		_selection.clear ();
 		return;
 	}
+
+	/* Spite: before set_state () below, which may show the Device view */
+	_device_box.set_session (s);
 
 	_application_bar.set_session (_session);
 	_cue_box.set_session (s);
@@ -408,6 +437,7 @@ TriggerPage::set_session (Session* s)
 	if (_session->master_out () && !_master_strip) {
 		_master_strip = new TriggerStrip (_session, _session->master_out ());
 		_master_strip->signal_button_release_event().connect (sigc::bind (sigc::mem_fun(*this, &TriggerPage::strip_button_release_event), _master_strip));
+		_master_strip->NameClicked.connect (sigc::bind (sigc::mem_fun (*this, &TriggerPage::strip_name_clicked), _master_strip)); /* Spite: Device view */
 		_master_align.add (*_master_strip);
 	}
 	if (_master_strip) {
@@ -448,6 +478,7 @@ TriggerPage::session_going_away ()
 #endif
 	_selection.clear ();
 	_strips.clear ();
+	_device_route_hint.reset (); /* Spite: Device view */
 
 	SessionHandlePtr::session_going_away ();
 	update_title ();
@@ -519,6 +550,11 @@ void
 TriggerPage::region_captured (Trigger const * trigger)
 {
 	if (!trigger) {
+		return;
+	}
+
+	if (_bottom_mode == DeviceMode) {
+		/* Spite: the Device view stays as it is, like Live */
 		return;
 	}
 
@@ -604,7 +640,179 @@ TriggerPage::selection_changed ()
 {
 	Selection& selection (Editor::instance ().get_selection ());
 
+	if (!selection.triggers.empty ()) {
+		/* Spite: the Device view follows the track of the clip picked last */
+		std::shared_ptr<TriggerBox> box = selection.triggers.front ()->trigger_reference ().box ();
+		for (auto const& s : _strips) {
+			std::shared_ptr<Route> r = s->route ();
+			if (r && box && r->triggerbox () == box) {
+				_device_route_hint = r;
+				break;
+			}
+		}
+		/* and picking a clip shows it, like Live */
+		if (_bottom_mode == DeviceMode) {
+			set_bottom_mode (ClipMode, false);
+			return;
+		}
+	}
+
+	refresh_bottom ();
+}
+
+/* Spite: the bottom panel's Clip and Device views */
+
+void
+TriggerPage::refresh_bottom ()
+{
+	if (_bottom_mode == DeviceMode) {
+		show_device_view ();
+	} else {
+		show_clip_view ();
+	}
+}
+
+void
+TriggerPage::set_bottom_mode (BottomMode m, bool by_user)
+{
+	bool const changed = (m != _bottom_mode);
+	_bottom_mode = m;
+
+	if (!_setting_bottom_mode) {
+		/* keep the radio actions in step, without coming back here */
+		PBD::Unwinder<bool> uw (_setting_bottom_mode, true);
+		Glib::RefPtr<RadioAction> ract = ActionManager::get_radio_action (X_("Cues"), m == DeviceMode ? X_("show-device-view") : X_("show-clip-view"));
+		if (!ract->get_active ()) {
+			ract->set_active (true);
+		}
+	}
+
+	if (changed) {
+		refresh_bottom ();
+	}
+
+	if (by_user && !should_show_att_bottom ()) {
+		/* asking for a view opens the panel, the same way Ctrl+Alt+L does */
+		show_att_bottom (true);
+	}
+}
+
+void
+TriggerPage::bottom_mode_action (BottomMode m)
+{
+	if (_setting_bottom_mode) {
+		return;
+	}
+	/* radio actions call this for the one switched off too */
+	Glib::RefPtr<RadioAction> ract = ActionManager::get_radio_action (X_("Cues"), m == DeviceMode ? X_("show-device-view") : X_("show-clip-view"));
+	if (!ract->get_active ()) {
+		return;
+	}
+	set_bottom_mode (m, true);
+}
+
+void
+TriggerPage::toggle_clip_device_view ()
+{
+	set_bottom_mode (_bottom_mode == ClipMode ? DeviceMode : ClipMode, true);
+}
+
+std::shared_ptr<Route>
+TriggerPage::device_route () const
+{
+	if (!_session || _session->deletion_in_progress ()) {
+		return std::shared_ptr<Route> ();
+	}
+
+	Selection& selection (Editor::instance ().get_selection ());
+
+	std::shared_ptr<Route> clip_route;
+	if (!selection.triggers.empty ()) {
+		std::shared_ptr<TriggerBox> box = selection.triggers.front ()->trigger_reference ().box ();
+		for (auto const& s : _strips) {
+			std::shared_ptr<Route> r = s->route ();
+			if (r && box && r->triggerbox () == box) {
+				clip_route = r;
+				break;
+			}
+		}
+	}
+
+	/* the track picked last, by its name or one of its clips */
+	std::shared_ptr<Route> hint = _device_route_hint.lock ();
+	if (hint && (hint->is_selected () || hint == clip_route)) {
+		return hint;
+	}
+	if (clip_route) {
+		return clip_route;
+	}
+	return std::dynamic_pointer_cast<Route> (_session->selection ().first_selected_stripable ());
+}
+
+void
+TriggerPage::update_device_view ()
+{
+	if (_bottom_mode != DeviceMode) {
+		return;
+	}
+
+	std::shared_ptr<Route> r = device_route ();
+
+	if (r) {
+		_device_box.set_route (r);
+		_device_empty_label.hide ();
+		_device_box.show ();
+	} else {
+		_device_box.set_route (std::shared_ptr<Route> ());
+		_device_box.hide ();
+		_device_empty_label.show ();
+	}
+}
+
+void
+TriggerPage::show_device_view ()
+{
 	hide_all ();
+	_properties_box.hide ();
+
+	update_device_view ();
+
+	hpacker.show ();
+	if (_show_bottom_pane) {
+		Tabbable::showhide_att_bottom (true);
+	}
+}
+
+void
+TriggerPage::strip_name_clicked (GdkEventButton* ev, TriggerStrip* strip)
+{
+	/* select it as a click on the strip does, then show its devices */
+	strip_button_release_event (ev, strip);
+
+	std::shared_ptr<Route> r = strip->route ();
+	if (r && r->is_selected ()) {
+		_device_route_hint = r;
+	}
+
+	if (_bottom_mode != DeviceMode) {
+		set_bottom_mode (DeviceMode, false);
+	} else {
+		update_device_view ();
+	}
+}
+
+void
+TriggerPage::show_clip_view ()
+{
+	Selection& selection (Editor::instance ().get_selection ());
+
+	hide_all ();
+
+	/* Spite: leave the Device view, letting go of its plugin UIs */
+	_device_box.hide ();
+	_device_empty_label.hide ();
+	_device_box.set_route (std::shared_ptr<Route> ());
+	_properties_box.show ();
 
 	Tabbable::showhide_att_bottom (false);
 
@@ -682,6 +890,7 @@ TriggerPage::add_routes (RouteList& rl)
 		(*r)->presentation_info ().PropertyChanged.connect (*this, invalidator (*this), std::bind (&TriggerPage::stripable_property_changed, this, _1, std::weak_ptr<Stripable> (*r)), gui_context ());
 		(*r)->PropertyChanged.connect (*this, invalidator (*this), std::bind (&TriggerPage::stripable_property_changed, this, _1, std::weak_ptr<Stripable> (*r)), gui_context ());
 		ts->signal_button_release_event().connect (sigc::bind (sigc::mem_fun(*this, &TriggerPage::strip_button_release_event), ts));
+		ts->NameClicked.connect (sigc::bind (sigc::mem_fun (*this, &TriggerPage::strip_name_clicked), ts)); /* Spite: Device view */
 	}
 	redisplay_track_list ();
 }
@@ -785,6 +994,7 @@ TriggerPage::pi_property_changed (PBD::PropertyChange const& what_changed)
 {
 	if (what_changed.contains (Properties::selected)) {
 		_selection.presentation_info_changed (what_changed);
+		update_device_view (); /* Spite: follow the selected track */
 	}
 	if (what_changed.contains (ARDOUR::Properties::order)) {
 		redisplay_track_list ();
@@ -1056,6 +1266,14 @@ TriggerPage::register_actions ()
 	/* Spite: hide the strips' device lists, leaving clip slots, empty space and the mixer */
 	act = ActionManager::register_toggle_action (trigger_actions, "ToggleStripDevices", _("Cue Page: Show Devices in Strips"), sigc::mem_fun (*this, &TriggerPage::toggle_strip_devices));
 	Glib::RefPtr<ToggleAction>::cast_dynamic (act)->set_active (UIConfiguration::instance ().get_cue_strip_show_devices ());
+
+	/* Spite: the bottom panel's Clip and Device views; the "Clip and Device"
+	 * macro cycles them with Tab
+	 */
+	RadioAction::Group bottom_mode_group;
+	ActionManager::register_radio_action (trigger_actions, bottom_mode_group, X_("show-clip-view"), _("Cue Page: Show Clip View"), sigc::bind (sigc::mem_fun (*this, &TriggerPage::bottom_mode_action), ClipMode));
+	ActionManager::register_radio_action (trigger_actions, bottom_mode_group, X_("show-device-view"), _("Cue Page: Show Device View"), sigc::bind (sigc::mem_fun (*this, &TriggerPage::bottom_mode_action), DeviceMode));
+	ActionManager::register_action (trigger_actions, X_("toggle-clip-device-view"), _("Cue Page: Switch Clip/Device View"), sigc::mem_fun (*this, &TriggerPage::toggle_clip_device_view));
 
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot-alt", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));

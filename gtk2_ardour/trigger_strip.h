@@ -72,6 +72,12 @@ public:
 	 * place of clip slots, like Live's Main track */
 	bool is_master_strip () const { return _is_master; }
 
+	/* Spite: a left click on the name, while connected, selects the
+	 * track and shows its devices instead of opening the track menu,
+	 * which stays on the right button
+	 */
+	sigc::signal<void, GdkEventButton*> NameClicked;
+
 	static PBD::Signal<void(TriggerStrip*)> CatchDeletion;
 
 protected:
