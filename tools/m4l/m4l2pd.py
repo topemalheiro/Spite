@@ -222,7 +222,7 @@ def strip_attributes(args):
 
 
 def timed(name, args, warn):
-    """metro/qmetro/phasor~ with note values or @attributes -> plain Pd"""
+    """metro/qmetro/phasor~/delay with note values or @attributes -> plain Pd"""
     plain, attrs = strip_attributes(args)
     words = plain.split()
     if 'interval' in attrs and not words:
@@ -463,7 +463,7 @@ class Converter:
                 return (subpatch(xy, 'tapout~', objs, conns), None)
             if name == 'poly~':
                 self.warn('poly~ is not converted yet: ' + text)
-            if name in ('metro', 'qmetro', 'phasor~') and re.search(r'@|\d+n[dt]?\b|ticks', args):
+            if name in ('metro', 'qmetro', 'phasor~', 'del', 'delay') and re.search(r'@|\d+n[dt]?\b|ticks', args):
                 return (['#X obj %s %s;' % (xy, pd_escape(timed(name, args, self.warn)))], None)
             if name == 'zmap':
                 expr = zmap_expr(args)
