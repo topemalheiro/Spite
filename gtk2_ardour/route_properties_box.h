@@ -51,6 +51,10 @@ public:
 	/* shown instead of an empty strip when the track has no plugins; empty for none */
 	void set_empty_text (std::string const&);
 
+	/* Spite: the Cue page's device view always shows the device list
+	 * beside the device panels, at its natural (Live-like) height */
+	void set_always_show_insert_list (bool);
+
 private:
 	void property_changed (const PBD::PropertyChange& what_changed);
 	void map_frozen ();
@@ -77,6 +81,7 @@ private:
 	ArdourWidgets::Frame _insert_frame;
 	ProcessorBox*        _insert_box;
 	bool                 _show_insert;
+	bool                 _always_show_insert;
 
 	int _idle_refill_processors_id;
 
