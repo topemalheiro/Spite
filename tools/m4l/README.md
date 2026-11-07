@@ -11,9 +11,13 @@ python3 tools/m4l/m4l2pd.py "My Device.amxd" out/
 python3 tools/m4l/m4l2pd.py --install ~/Music/Devices/*.amxd
 ```
 
-In Spite, add **plugdata-fx** (for audio effects) or **plugdata** (for instruments and MIDI effects) to a track. Then pick **M4L: <device name>** from the plugin's presets. Spite needs plugdata's LV2 plugins: build them from the `plugdata` submodule and copy or link `plugdata/Plugins/LV2/plugdata.lv2` and `plugdata-fx.lv2` into `~/.lv2`.
+In Spite, add **PgD4S-fx** (for audio effects) or **PgD4S** (for instruments and MIDI effects) to a track. PgD4S is plugdata for Spite, built from the `plugdata` submodule. Then pick **M4L: <device name>** from the plugin's presets. On the Cue page, the Device view (Tab) shows the device's face, as Live does, and double-clicking its title bar opens the patch. To build the plugins, link `plugdata/Plugins/LV2/PgD4S.lv2` and `PgD4S-fx.lv2` into `~/.lv2`.
 
 ## What converts
+
+- **The face.** Max's presentation layout becomes PgD4S's own presentation layout (`#X presentation` lines): every object keeps its patching position and also gets its presentation one. The patch window looks like Max's patching view; the Device view, PgD4S's plugin mode and its presentation mode show the face. Bpatchers become graph-on-parent windows onto their own presentation layout.
+- **Tidy cords.** Cords routed with midpoints in Max keep their route, as PgD4S's segmented connections.
+- **Live's controls, in Live's colours:** `live.dial` becomes a knob with its name, `live.numbox` a number box with its unit, `live.menu` a drop-down menu, `live.tab` a grid of cells (with the device's own pictures), `live.text` a text button.
 
 - **Max and MSP objects.** plugdata includes cyclone, which provides Max's objects under their Max names, so most of them work as they are.
 - **Subpatchers and bpatchers.** These become subpatches. Abstractions frozen inside the device become `.pd` files next to the patch.
@@ -27,6 +31,8 @@ In Spite, add **plugdata-fx** (for audio effects) or **plugdata** (for instrumen
   - `live.menu` and `live.tab` become a radio selector that also sends the item's name;
   - `live.gain~` becomes a dB gain stage.
 - **Tempo-synced times.** `metro 16n`, `qmetro` and `phasor~ 4n` get fixed times at 120 BPM, for now.
+- **Window control:** `pcontrol` (open and close a subpatcher) and `thispatcher` (scroll a bpatcher, size or show a canvas) become Pd canvas messages.
+- **Known compiled externals,** rebuilt in Pd: trnr.Flechtwerk's `trnr.core.flechtwerk~` (a Mutable Instruments Plaits port) runs on ELSE's `[plaits~]`.
 - **Max-only helpers:**
   - `zmap`, and the simple forms of `if`, become `expr`;
   - `gswitch` and `gswitch2` become switching subpatches;
@@ -37,7 +43,8 @@ Anything that can't be translated stays in the patch under its Max name, as a br
 ## What doesn't yet
 
 - **The Live API** (`live.path`, `live.object`, `live.observer`, `live.remote~`). This needs a bridge to Spite.
-- **JavaScript** (`js`, `v8`, `node.script`), **`gen~`** and **`poly~`**.
+- **JavaScript** (`js`, `v8`, `node.script`), **`gen~`**, multichannel (`mc.*`) objects, and `poly~` with several voices (one voice works).
+- **Live's transport** (`transport`, `live.step`, tempo-locked `phasor~`): sequencers such as Snake Mod Super show their face but don't step yet.
 - **Devices encrypted by Ableton**, such as Live's own built-in devices, can't be converted, and the converter refuses them.
 
 Converted devices remain their authors' work. Only convert devices you're allowed to use, and don't redistribute other people's converted devices unless their licence allows it.
