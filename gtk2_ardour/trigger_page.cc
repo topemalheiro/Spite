@@ -68,7 +68,7 @@ using namespace Gtk;
 using namespace std;
 
 TriggerPage::TriggerPage ()
-	: Tabbable (_("Cues"), X_("trigger"), NULL, true, Tabbable::PaneLayout (Tabbable::PaneRight | Tabbable::AttBottom))
+	: Tabbable (_("Cues"), X_("trigger"), NULL, true, Tabbable::PaneLayout (Tabbable::PaneRight | Tabbable::PaneBottom))
 	, _cue_area_frame (0.5, 0, 1.0, 0)
 	, _plugin_browser (true)
 	, _cue_box (16, 16 * TriggerBox::default_triggers_per_box)
@@ -78,6 +78,7 @@ TriggerPage::TriggerPage ()
 	  /* Spite: tracks' devices show in the Device view, not here */
 	, _properties_box (SelectionPropertiesBox::DispositionMask (SelectionPropertiesBox::ShowRegions | SelectionPropertiesBox::ShowTriggers))
 	, _bottom_mode (ClipMode)
+	, _bottom_h (0)
 	, _setting_bottom_mode (false)
 	, _selection (*this, *this)
 	, clip_editor_column (-1)
@@ -189,6 +190,11 @@ TriggerPage::TriggerPage ()
 	 * its device list, like Live's Device View
 	 */
 	_device_box.set_always_show_insert_list (true);
+	_device_box.set_device_faces (true);
+	_pane_pos[ClipMode]   = 0.6f;  /* the clip editor needs room */
+	_pane_pos[DeviceMode] = 0.85f; /* about Live's device height on a 1080p screen */
+	/* Spite: the Device view's height (its pane divider) sets the faces' zoom */
+	content_att_bottom.signal_size_allocate ().connect (sigc::mem_fun (*this, &TriggerPage::bottom_size_allocate));
 	_device_box.set_no_show_all ();
 	_device_empty_label.set_text (_("No track selected. Click a track's name to see its devices."));
 	_device_empty_label.set_alignment (0.5, 0.5);
@@ -314,6 +320,9 @@ TriggerPage::get_state () const
 
 	/* Spite: Clip or Device view */
 	node->set_property (X_("bottom-mode"), std::string (_bottom_mode == DeviceMode ? X_("device") : X_("clip")));
+	const_cast<TriggerPage*> (this)->_pane_pos[_bottom_mode] = const_cast<TriggerPage*> (this)->content_bottom_pane.get_divider ();
+	node->set_property (X_("clip-pane-pos"), _pane_pos[ClipMode]);
+	node->set_property (X_("device-pane-pos"), _pane_pos[DeviceMode]);
 
 	return *node;
 }
@@ -379,7 +388,9 @@ TriggerPage::set_state (const XMLNode& node, int version)
 		tact->set_active (yn);
 	}
 
-	/* Spite: Clip or Device view */
+	/* Spite: Clip or Device view, each with its own height */
+	node.get_property (X_("clip-pane-pos"), _pane_pos[ClipMode]);
+	node.get_property (X_("device-pane-pos"), _pane_pos[DeviceMode]);
 	std::string mode;
 	if (node.get_property (X_("bottom-mode"), mode)) {
 		set_bottom_mode (mode == X_("device") ? DeviceMode : ClipMode, false);
@@ -676,6 +687,10 @@ void
 TriggerPage::set_bottom_mode (BottomMode m, bool by_user)
 {
 	bool const changed = (m != _bottom_mode);
+	if (changed) {
+		/* each view keeps its own height: Live-sized devices, a taller clip editor */
+		_pane_pos[_bottom_mode] = content_bottom_pane.get_divider ();
+	}
 	_bottom_mode = m;
 
 	if (!_setting_bottom_mode) {
@@ -688,6 +703,7 @@ TriggerPage::set_bottom_mode (BottomMode m, bool by_user)
 	}
 
 	if (changed) {
+		content_bottom_pane.set_divider (0, _pane_pos[m]);
 		refresh_bottom ();
 	}
 
@@ -695,6 +711,27 @@ TriggerPage::set_bottom_mode (BottomMode m, bool by_user)
 		/* asking for a view opens the panel, the same way Ctrl+Alt+L does */
 		show_att_bottom (true);
 	}
+}
+
+void
+TriggerPage::bottom_size_allocate (Gtk::Allocation& a)
+{
+	if (a.get_height () == _bottom_h) {
+		return;
+	}
+	_bottom_h = a.get_height ();
+	/* not inside the allocation: the faces' new size makes another one */
+	_face_idle.disconnect ();
+	_face_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &TriggerPage::apply_face_height));
+}
+
+bool
+TriggerPage::apply_face_height ()
+{
+	if (_bottom_mode == DeviceMode && _bottom_h > 0) {
+		_device_box.set_available_height (_bottom_h);
+	}
+	return false;
 }
 
 void
