@@ -57,6 +57,7 @@ typedef struct {
 	SuilX11SizeHints            base_size;
 	SuilX11SizeHints            min_size;
 	bool                        query_wm;
+	bool                        embedded; /* Spite: inside a host page, not a plugin window */
 } SuilX11Wrapper;
 
 typedef struct {
@@ -163,15 +164,30 @@ suil_x11_wrapper_realize(GtkWidget* w)
 
 	gtk_socket_add_id(socket, gtk_plug_get_id(wrap->plug));
 
+	/* Spite: a UI embedded in a host page (its container carries "suil-embedded")
+	   leaves the host's keyboard focus and drag and drop alone */
+	wrap->embedded = false;
+	for (GtkWidget* p = w; p; p = gtk_widget_get_parent(p)) {
+		if (g_object_get_data(G_OBJECT(p), "suil-embedded")) {
+			wrap->embedded = true;
+			break;
+		}
+	}
+
 	gtk_widget_set_sensitive(GTK_WIDGET(wrap->plug), TRUE);
 	gtk_widget_set_can_focus(GTK_WIDGET(wrap->plug), TRUE);
-	gtk_widget_grab_focus(GTK_WIDGET(wrap->plug));
+	if (!wrap->embedded) {
+		gtk_widget_grab_focus(GTK_WIDGET(wrap->plug));
+	}
 
 	// Setup drag/drop proxy from parent/grandparent window
 	GdkWindow* gwindow         = gtk_widget_get_window(GTK_WIDGET(wrap->plug));
 	Window     xwindow         = GDK_WINDOW_XID(gwindow);
 	Atom       xdnd_proxy_atom = gdk_x11_get_xatom_by_name("XdndProxy");
 	Window     plugin          = (Window)wrap->instance->ui_widget;
+	/* embedded: stop at the socket's own window, so drops on the rest of the
+	   host window still reach the host */
+	Window     last            = wrap->embedded ? GDK_WINDOW_XID(gtk_widget_get_window(w)) : 0;
 
 	while (xwindow) {
 		XChangeProperty(GDK_WINDOW_XDISPLAY(gwindow),
@@ -183,6 +199,9 @@ suil_x11_wrapper_realize(GtkWidget* w)
 		                (unsigned char*)&plugin,
 		                1);
 
+		if (xwindow == last) {
+			break;
+		}
 		xwindow = get_parent_window(GDK_WINDOW_XDISPLAY(gwindow), xwindow);
 	}
 }
@@ -431,6 +450,7 @@ suil_x11_wrapper_init(SuilX11Wrapper* self)
 	self->base_size   = (SuilX11SizeHints){false, 0, 0};
 	self->min_size    = (SuilX11SizeHints){false, 0, 0};
 	self->query_wm    = true;
+	self->embedded    = false;
 }
 
 static int
@@ -444,6 +464,16 @@ wrapper_resize(LV2UI_Feature_Handle handle, int width, int height)
 
 	// Assume the plugin has also updated min/max size constraints
 	wrap->query_wm = true;
+
+	/* Spite: an embedded UI follows the size its plugin asks for (the face zooms
+	   when the host changes its scale factor), past the size request that
+	   suil_x11_on_map_event() froze */
+	if (wrap->embedded && wrap->custom_size.is_set) {
+		g_object_set(G_OBJECT(handle),
+		             "width-request", width,
+		             "height-request", height,
+		             NULL);
+	}
 
 	gtk_widget_queue_resize(GTK_WIDGET(handle));
 	return 0;
