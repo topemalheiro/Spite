@@ -28,6 +28,7 @@
 #include "gtk2ardour-config.h"
 #endif
 
+#include <set>
 #include <vector>
 #include <map>
 #include <list>
@@ -375,9 +376,22 @@ public:
 	void on_show ();
 	void on_hide ();
 
+	/* Spite: a plugin's custom GUI is either in its window or embedded as its face in the
+	 * Cue page's Device view, never both (JUCE plugins such as PgD4S allow one editor).
+	 * The window announces when its custom GUI comes (before it is created) and goes
+	 * (after it is freed); faces step aside meanwhile. */
+	static sigc::signal<void, ARDOUR::PlugInsertBase*> CustomGUIShowing;
+	static sigc::signal<void, ARDOUR::PlugInsertBase*> CustomGUIHidden;
+	static bool custom_gui_shown (ARDOUR::PlugInsertBase*);
+
 private:
+	void custom_gui_gone ();
+
 	std::string _title;
 	PlugUIBase* _pluginui;
+	ARDOUR::PlugInsertBase* _gui_insert;
+	bool        _custom_gui_shown;
+	static std::set<ARDOUR::PlugInsertBase*> _custom_guis;
 	PBD::ScopedConnection death_connection;
 	Gtk::Window* parent;
 	Gtk::VBox vbox;

@@ -37,6 +37,7 @@
 #include "ardour_dialog.h"
 #include "ardour/types.h"
 #include "plugin_ui.h"
+#include <lv2/options/options.h>
 
 #include "ardour/plug_insert_base.h"
 
@@ -72,6 +73,15 @@ public:
 	int package (Gtk::Window&);
 	void grab_focus ();
 
+	/* Spite: the plugin's own GUI embedded as its face in the Cue page's Device view: no
+	 * preset bar, no keyboard focus, its own scale factor (the face's zoom). The embedding
+	 * widget creates and frees the GUI; it must free it before anything re-parents it. */
+	void set_embedded (float scale);
+	void embed_show ();
+	void embed_hide ();
+	void set_face_scale (float scale);
+	bool embed_active () const { return _inst != 0; }
+
 private:
 
 	void control_changed (uint32_t);
@@ -98,6 +108,11 @@ private:
 	struct lv2_external_ui*                   _external_ui_ptr;
 	LV2_Feature                               _parent_feature;
 	void*                                     _inst;
+	bool                                      _embedded;
+	float                                     _face_scale;
+	float                                     _face_update_rate;
+	LV2_Options_Option*                       _face_options;
+	LV2_Feature                               _face_options_feature;
 
 	typedef std::set<uint32_t> Updates;
 	Updates _updates;

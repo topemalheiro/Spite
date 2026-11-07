@@ -55,6 +55,12 @@
 
 namespace ARDOUR {
 
+/* Spite: raised while the Device view creates a plugin's embedded face, so PgD4S (plugdata for
+ * Spite) can tell its face from its window: it looks up spite_lv2_ui_wants_face () */
+LIBARDOUR_API void set_lv2_ui_wants_face (bool);
+/* Spite: the height the Device view gives faces (spite_lv2_ui_face_height ()) */
+LIBARDOUR_API void set_lv2_ui_face_height (int);
+
 // a callback function for lilv_state_new_from_instance(). friend of LV2Plugin
 // so we can pass an LV2Plugin* in user_data and access its private members.
 const void* lv2plugin_get_port_value(const char* port_symbol,

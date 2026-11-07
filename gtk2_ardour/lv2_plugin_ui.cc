@@ -25,7 +25,9 @@
 
 #include <ytkmm/stock.h>
 
+#include "ardour/ardour.h"
 #include "ardour/lv2_plugin.h"
+#include "ardour/uri_map.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/session.h"
 #include "pbd/error.h"
@@ -42,6 +44,8 @@
 #include <lv2/lv2plug.in/ns/extensions/ui/ui.h>
 #endif
 
+#include <lv2/atom/atom.h>
+#include <lv2/options/options.h>
 #include <lilv/lilv.h>
 #include <suil/suil.h>
 
@@ -305,6 +309,10 @@ LV2PluginUI::LV2PluginUI(std::shared_ptr<PlugInsertBase> pib,
 	, _values_last_sent_to_ui(NULL)
 	, _external_ui_ptr(NULL)
 	, _inst(NULL)
+	, _embedded (false)
+	, _face_scale (1.f)
+	, _face_update_rate (60.f)
+	, _face_options (NULL)
 {
 	_ardour_buttons_box.set_spacing (6);
 	_ardour_buttons_box.set_border_width (6);
@@ -362,12 +370,18 @@ LV2PluginUI::lv2ui_instantiate(const std::string& title)
 		if (_ardour_buttons_box.get_parent()) {
 			_ardour_buttons_box.get_parent()->remove(_ardour_buttons_box);
 		}
-		pack_start(_ardour_buttons_box, false, false);
-		_ardour_buttons_box.show_all();
+		if (!_embedded) {
+			pack_start(_ardour_buttons_box, false, false);
+			_ardour_buttons_box.show_all();
+		}
 
 		_gui_widget = Gtk::manage((container = new Gtk::Alignment()));
 		pack_start(*_gui_widget, true, true);
 		_gui_widget->show();
+		if (_embedded) {
+			/* suil (vendored): leave the host's keyboard focus and drag and drop alone */
+			g_object_set_data (G_OBJECT (_gui_widget->gobj ()), "suil-embedded", GINT_TO_POINTER (1));
+		}
 
 		_parent_feature.URI  = LV2_UI__parent;
 		_parent_feature.data = _gui_widget->gobj();
@@ -376,6 +390,38 @@ LV2PluginUI::lv2ui_instantiate(const std::string& title)
 	}
 
 	features[fi] = NULL;
+
+	if (_embedded) {
+		/* the face's own options: a 60 Hz idle rate, so animated faces stay smooth (suil
+		 * reads ui:updateRate). The zoom is PgD4S's own (spite_lv2_ui_face_height): JUCE's
+		 * OpenGL view doesn't follow a fractional ui:scaleFactor for one window. */
+		for (size_t i = 0; i < fi; ++i) {
+			if (!features[i] || strcmp (features[i]->URI, LV2_OPTIONS__options)) {
+				continue;
+			}
+			const LV2_Options_Option* src = (const LV2_Options_Option*) features[i]->data;
+			size_t n = 0;
+			while (src[n].key || src[n].value) {
+				++n;
+			}
+			URIMap& uri_map = URIMap::instance ();
+			uint32_t const scale_key = uri_map.uri_to_id (LV2_UI__scaleFactor);
+			free (_face_options);
+			_face_options = (LV2_Options_Option*) calloc (n + 2, sizeof (LV2_Options_Option));
+			(void) scale_key;
+			for (size_t k = 0; k < n; ++k) {
+				_face_options[k] = src[k];
+			}
+			_face_options[n].context = LV2_OPTIONS_INSTANCE;
+			_face_options[n].key     = uri_map.uri_to_id (LV2_UI__updateRate);
+			_face_options[n].size    = sizeof (float);
+			_face_options[n].type    = uri_map.uri_to_id (LV2_ATOM__Float);
+			_face_options[n].value   = &_face_update_rate;
+			_face_options_feature.URI  = LV2_OPTIONS__options;
+			_face_options_feature.data = _face_options;
+			features[i] = &_face_options_feature;
+		}
+	}
 #ifdef HAVE_LV2_1_17_2
 	assert (fi == features_count + (is_external_ui ? 3 : 2));
 #else
@@ -409,6 +455,9 @@ LV2PluginUI::lv2ui_instantiate(const std::string& title)
 		return;
 	}
 
+	if (_embedded) {
+		ARDOUR::set_lv2_ui_wants_face (true); /* PgD4S shows plugin mode, as a face */
+	}
 	_inst = suil_instance_new(
 		ui_host,
 		this,
@@ -419,6 +468,9 @@ LV2PluginUI::lv2ui_instantiate(const std::string& title)
 		ui_bundle_path,
 		ui_binary_path,
 		features);
+	if (_embedded) {
+		ARDOUR::set_lv2_ui_wants_face (false);
+	}
 
 	free(ui_bundle_path);
 	free(ui_binary_path);
@@ -446,7 +498,9 @@ LV2PluginUI::lv2ui_instantiate(const std::string& title)
 		}
 		container->show_all();
 		gtk_widget_set_can_focus(c_widget, true);
-		gtk_widget_grab_focus(c_widget);
+		if (!_embedded) {
+			gtk_widget_grab_focus(c_widget);
+		}
 	} else {
 		_external_ui_ptr = (struct lv2_external_ui*)GET_WIDGET(_inst);
 	}
@@ -510,9 +564,59 @@ LV2PluginUI::lv2ui_free()
 	}
 }
 
+void
+LV2PluginUI::set_embedded (float scale)
+{
+	_embedded   = true;
+	_face_scale = scale;
+}
+
+void
+LV2PluginUI::embed_show ()
+{
+	if (!_inst) {
+		lv2ui_instantiate ("");
+	}
+	if (_inst) {
+		start_updating (0);
+	}
+}
+
+void
+LV2PluginUI::embed_hide ()
+{
+	lv2ui_free ();
+}
+
+void
+LV2PluginUI::set_face_scale (float scale)
+{
+	if (fabsf (scale - _face_scale) < 0.005f) {
+		return;
+	}
+	_face_scale = scale;
+	if (!_inst) {
+		return;
+	}
+	/* the GUI rescales itself (LV2 options interface) and asks for its new size */
+	const LV2_Options_Interface* iface = (const LV2_Options_Interface*) suil_instance_extension_data ((SuilInstance*)_inst, LV2_OPTIONS__interface);
+	if (iface && iface->set) {
+		URIMap&            uri_map = URIMap::instance ();
+		LV2_Options_Option opts[2];
+		memset (opts, 0, sizeof (opts));
+		opts[0].context = LV2_OPTIONS_INSTANCE;
+		opts[0].key     = uri_map.uri_to_id (LV2_UI__scaleFactor);
+		opts[0].size    = sizeof (float);
+		opts[0].type    = uri_map.uri_to_id (LV2_ATOM__Float);
+		opts[0].value   = &_face_scale;
+		iface->set (suil_instance_get_handle ((SuilInstance*)_inst), opts);
+	}
+}
+
 LV2PluginUI::~LV2PluginUI ()
 {
 	delete [] _values_last_sent_to_ui;
+	free (_face_options);
 
 	_message_update_connection.disconnect();
 	_screen_update_connection.disconnect();

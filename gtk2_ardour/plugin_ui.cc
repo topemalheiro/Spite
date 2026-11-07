@@ -114,6 +114,8 @@ PluginUIWindow::PluginUIWindow (std::shared_ptr<PlugInsertBase> pib,
                                 bool                            scrollable,
                                 bool                            editor)
 	: ArdourWindow (string ())
+	, _gui_insert (pib.get ())
+	, _custom_gui_shown (false)
 	, was_visible (false)
 	, _keyboard_focused (false)
 #ifdef AUDIOUNIT_SUPPORT
@@ -199,9 +201,30 @@ PluginUIWindow::PluginUIWindow (std::shared_ptr<PlugInsertBase> pib,
 	unset_transient_for ();
 }
 
+sigc::signal<void, PlugInsertBase*> PluginUIWindow::CustomGUIShowing;
+sigc::signal<void, PlugInsertBase*> PluginUIWindow::CustomGUIHidden;
+std::set<PlugInsertBase*>           PluginUIWindow::_custom_guis;
+
+bool
+PluginUIWindow::custom_gui_shown (PlugInsertBase* pib)
+{
+	return _custom_guis.find (pib) != _custom_guis.end ();
+}
+
+void
+PluginUIWindow::custom_gui_gone ()
+{
+	if (_custom_gui_shown) {
+		_custom_gui_shown = false;
+		_custom_guis.erase (_gui_insert);
+		CustomGUIHidden (_gui_insert);
+	}
+}
+
 PluginUIWindow::~PluginUIWindow ()
 {
 	delete _pluginui;
+	custom_gui_gone ();
 
 	if (the_plugin_window == this) {
 		the_plugin_window = 0;
@@ -232,6 +255,12 @@ PluginUIWindow::on_show ()
 		}
 #endif
 
+		if (!dynamic_cast<GenericPluginUI*> (_pluginui) && !_custom_gui_shown) {
+			/* an embedded face of this plugin frees its GUI now, before ours exists */
+			_custom_gui_shown = true;
+			_custom_guis.insert (_gui_insert);
+			CustomGUIShowing (_gui_insert);
+		}
 		if (_pluginui->on_window_show (_title)) {
 			Window::on_show ();
 		}
@@ -250,6 +279,7 @@ PluginUIWindow::on_hide ()
 	if (_pluginui) {
 		_pluginui->on_window_hide ();
 	}
+	custom_gui_gone ();
 }
 
 void

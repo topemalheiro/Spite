@@ -150,6 +150,40 @@ static const size_t NBUFS = 4;
 
 using namespace std;
 using namespace ARDOUR;
+
+static int lv2_ui_face_requests = 0;
+
+void
+ARDOUR::set_lv2_ui_wants_face (bool yn)
+{
+	lv2_ui_face_requests += yn ? 1 : -1;
+	if (lv2_ui_face_requests < 0) {
+		lv2_ui_face_requests = 0;
+	}
+}
+
+/* found by PgD4S with dlsym (RTLD_DEFAULT, ...) while it creates its editor, in the GUI thread */
+extern "C" LIBARDOUR_API int
+spite_lv2_ui_wants_face (void)
+{
+	return lv2_ui_face_requests > 0;
+}
+
+static int lv2_ui_face_height = 0;
+
+void
+ARDOUR::set_lv2_ui_face_height (int h)
+{
+	lv2_ui_face_height = h;
+}
+
+/* the height, in pixels, the Device view gives faces: PgD4S zooms its face to it (read with
+ * dlsym, in the GUI thread, also while the face is shown, so a resized Device view zooms) */
+extern "C" LIBARDOUR_API int
+spite_lv2_ui_face_height (void)
+{
+	return lv2_ui_face_height;
+}
 using namespace PBD;
 using namespace Temporal;
 

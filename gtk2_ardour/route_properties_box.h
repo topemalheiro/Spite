@@ -55,6 +55,11 @@ public:
 	 * beside the device panels, at its natural (Live-like) height */
 	void set_always_show_insert_list (bool);
 
+	/* Spite: PgD4S devices show their own faces (the Cue page's Device view) */
+	void set_device_faces (bool);
+	/* the height the Device view has: faces zoom to fit it */
+	void set_available_height (int);
+
 private:
 	void property_changed (const PBD::PropertyChange& what_changed);
 	void map_frozen ();
@@ -82,6 +87,12 @@ private:
 	ProcessorBox*        _insert_box;
 	bool                 _show_insert;
 	bool                 _always_show_insert;
+	bool                 _device_faces;
+	float                _face_zoom;
+	std::vector<class DeviceFace*> _faces;
+
+	int face_height () const;
+	int title_height () const;
 
 	int _idle_refill_processors_id;
 

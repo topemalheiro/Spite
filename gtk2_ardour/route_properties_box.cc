@@ -38,9 +38,13 @@
 #include "plugin_selector.h"
 #include "plugin_ui.h"
 #include "port_insert_ui.h"
+#include "lv2_plugin_ui.h"
 #include "route_properties_box.h"
 #include "timers.h"
 #include "ui_config.h"
+
+#include "ardour/lv2_plugin.h"
+#include "ardour/plugin_insert.h"
 
 #include "pbd/i18n.h"
 
@@ -129,12 +133,197 @@ ProcessorUIFrame::save_state () const
 	state->set_property (X_("visible"), !_collapse_btn.get_active ());
 }
 
+/* Spite: a device in the Cue page's Device view that shows the plugin's own GUI as its face,
+ * under a title bar, like Live's device chain. Used for PgD4S (plugdata for Spite), whose GUI
+ * then shows the patch in plugin mode: a converted Max for Live device's presentation. */
+class DeviceFace : public Gtk::VBox
+{
+public:
+	DeviceFace (std::shared_ptr<Processor>, std::shared_ptr<PlugInsertBase>, std::shared_ptr<LV2Plugin>, int face_h, int title_h);
+	~DeviceFace ();
+
+	/* free the GUI: before the face leaves its container (a live X11 GUI must never be re-parented) */
+	void release ();
+	void set_face_height (int);
+
+protected:
+	void on_realize ();
+	void on_unrealize ();
+
+private:
+	bool idle_show_face ();
+	void gui_showing (PlugInsertBase*);
+	void gui_hidden (PlugInsertBase*);
+	bool title_press (GdkEventButton*);
+
+	Gtk::EventBox                   _title;
+	Gtk::HBox                       _title_box;
+	ArdourButton                    _enable_btn;
+	Gtk::Label                      _name;
+	Gtk::VBox                       _body;
+	Gtk::Label                      _placeholder;
+	LV2PluginUI*                    _ui;
+	std::shared_ptr<Processor>      _proc;
+	std::shared_ptr<PlugInsertBase> _pib;
+	int                             _face_h;
+	float                           _scale;
+	sigc::connection                _idle;
+	sigc::connection                _showing_connection;
+	sigc::connection                _hidden_connection;
+	PBD::ScopedConnectionList       _connections;
+};
+
+/* the device's name, as Live shows it: a converted Max for Live device's own name (its preset
+ * is "M4L: <name>"), else the processor's name */
+static std::string
+device_name (std::shared_ptr<Processor> p, std::shared_ptr<LV2Plugin> lv2)
+{
+	std::string const label = lv2->last_preset ().label;
+	if (label.compare (0, 5, "M4L: ") == 0 && label.size () > 5) {
+		return label.substr (5);
+	}
+	return p->display_name ();
+}
+
+DeviceFace::DeviceFace (std::shared_ptr<Processor> p, std::shared_ptr<PlugInsertBase> pib, std::shared_ptr<LV2Plugin> lv2, int face_h, int title_h)
+	: _enable_btn (ArdourButton::just_led_default_elements)
+	, _name (device_name (p, lv2))
+	, _ui (new LV2PluginUI (pib, lv2))
+	, _proc (p)
+	, _pib (pib)
+	, _face_h (face_h)
+	, _scale (face_h / 169.f) /* a Max for Live device's face is 169 px tall */
+{
+	_ui->set_embedded (_scale);
+
+	_title.modify_bg (Gtk::STATE_NORMAL, Gdk::Color ("#464646"));
+	_name.set_alignment (0, 0.5);
+	_name.modify_fg (Gtk::STATE_NORMAL, Gdk::Color ("#e6e6e6"));
+	_name.set_ellipsize (Pango::ELLIPSIZE_END);
+	_enable_btn.set_tweaks (ArdourButton::ExpandtoSquare);
+	_enable_btn.set_active (_proc->enabled ());
+	_enable_btn.signal_clicked.connect ([this] () { _proc->enable (!_proc->enabled ()); });
+	p->ActiveChanged.connect (_connections, invalidator (*this), [this] () { _enable_btn.set_active (_proc->enabled ()); }, gui_context ());
+
+	_title_box.pack_start (_enable_btn, false, false, 3);
+	_title_box.pack_start (_name, true, true, 2);
+	_title.add (_title_box);
+	_title.set_size_request (-1, title_h);
+	_title.add_events (Gdk::BUTTON_PRESS_MASK);
+	_title.signal_button_press_event ().connect (sigc::mem_fun (*this, &DeviceFace::title_press), false);
+	set_tooltip (&_enable_btn, _("Turn the device on or off"));
+	set_tooltip (&_title, _("Double-click to open its window"));
+
+	_placeholder.set_text (_("In its window"));
+	_placeholder.set_no_show_all ();
+	_body.pack_start (*_ui, true, true);
+	_body.pack_start (_placeholder, true, true);
+	_body.set_size_request (-1, face_h);
+
+	pack_start (_title, false, false);
+	pack_start (_body, false, false); /* the face's own height: no band around it */
+
+	_showing_connection = PluginUIWindow::CustomGUIShowing.connect (sigc::mem_fun (*this, &DeviceFace::gui_showing));
+	_hidden_connection  = PluginUIWindow::CustomGUIHidden.connect (sigc::mem_fun (*this, &DeviceFace::gui_hidden));
+	show_all ();
+}
+
+DeviceFace::~DeviceFace ()
+{
+	_showing_connection.disconnect ();
+	_hidden_connection.disconnect ();
+	release ();
+	delete _ui;
+}
+
+void
+DeviceFace::release ()
+{
+	_idle.disconnect ();
+	if (_ui->embed_active ()) {
+		_ui->embed_hide ();
+	}
+}
+
+void
+DeviceFace::on_realize ()
+{
+	Gtk::VBox::on_realize ();
+	_idle.disconnect ();
+	_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
+}
+
+void
+DeviceFace::on_unrealize ()
+{
+	release (); /* while the GUI is still in place */
+	Gtk::VBox::on_unrealize ();
+}
+
+bool
+DeviceFace::idle_show_face ()
+{
+	if (!get_realized ()) {
+		return false;
+	}
+	if (PluginUIWindow::custom_gui_shown (_pib.get ())) {
+		_ui->hide ();
+		_placeholder.show ();
+		return false;
+	}
+	_placeholder.hide ();
+	_ui->show ();
+	_ui->embed_show ();
+	return false;
+}
+
+void
+DeviceFace::set_face_height (int h)
+{
+	if (h == _face_h || h < 20) {
+		return;
+	}
+	_face_h = h;
+	_body.set_size_request (-1, h); /* PgD4S zooms to spite_lv2_ui_face_height () */
+}
+
+void
+DeviceFace::gui_showing (PlugInsertBase* pib)
+{
+	if (pib == _pib.get ()) {
+		release ();
+		_ui->hide ();
+		_placeholder.show ();
+	}
+}
+
+void
+DeviceFace::gui_hidden (PlugInsertBase* pib)
+{
+	if (pib == _pib.get () && get_realized ()) {
+		_idle.disconnect ();
+		_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
+	}
+}
+
+bool
+DeviceFace::title_press (GdkEventButton* ev)
+{
+	if (ev->type == GDK_2BUTTON_PRESS && ev->button == 1) {
+		_proc->ShowUI (); /* the plugin's window: PgD4S shows its patch editor there */
+		return true;
+	}
+	return false;
+}
+
 /* ****************************************************************************/
 
 RoutePropertiesBox::RoutePropertiesBox ()
 	: _insert_box (nullptr)
 	, _show_insert (false)
 	, _always_show_insert (false)
+	, _device_faces (false)
+	, _face_zoom (1.f)
 	, _idle_refill_processors_id (-1)
 {
 	_scroller.set_policy (Gtk::POLICY_AUTOMATIC, Gtk::POLICY_NEVER);
@@ -200,7 +389,8 @@ RoutePropertiesBox::set_session (ARDOUR::Session* s) {
 	_insert_frame.remove ();
 	_insert_frame.add (*_insert_box);
 	_insert_frame.set_padding (4);
-	_insert_frame.set_size_request (144 * ui_scale, 236 * ui_scale);
+	/* Spite: in the Cue page's Device view the list follows the faces' height */
+	_insert_frame.set_size_request (144 * ui_scale, _device_faces ? -1 : 236 * ui_scale);
 
 	_session->SurroundMasterAddedOrRemoved.connect (_session_connections, invalidator (*this), std::bind (&RoutePropertiesBox::surround_master_added_or_removed, this), gui_context());
 }
@@ -261,7 +451,7 @@ void
 RoutePropertiesBox::update_processor_box_visibility ()
 {
 	_show_insert = _always_show_insert || !ActionManager::get_toggle_action (X_("Editor"), X_("show-editor-mixer"))->get_active ();
-	if (!_show_insert || (_proc_uis.empty () && !_always_show_insert)) {
+	if (!_show_insert || (_proc_uis.empty () && _faces.empty () && !_always_show_insert)) {
 		_insert_frame.hide ();
 	} else {
 		_insert_frame.show ();
@@ -286,7 +476,7 @@ void
 RoutePropertiesBox::update_empty_label ()
 {
 	/* nothing to show: say so, rather than collapsing to an empty strip */
-	if (_proc_uis.empty () && !_insert_frame.get_visible () && !_empty_label.get_text ().empty ()) {
+	if (_proc_uis.empty () && _faces.empty () && !_insert_frame.get_visible () && !_empty_label.get_text ().empty ()) {
 		_empty_label.show ();
 	} else {
 		_empty_label.hide ();
@@ -299,6 +489,49 @@ RoutePropertiesBox::set_always_show_insert_list (bool yn)
 	_always_show_insert = yn;
 	if (_route) {
 		update_processor_box_visibility ();
+	}
+}
+
+void
+RoutePropertiesBox::set_device_faces (bool yn)
+{
+	_device_faces = yn;
+	if (_route) {
+		set_route (_route, true);
+	}
+}
+
+/* Live's device view: the face is 9.49 clip rows tall and the title bar 1.07, and a
+ * Cue page clip row is 16 px times the UI scale (trigger_strip.cc, fitted_canvas_widget.cc) */
+int
+RoutePropertiesBox::face_height () const
+{
+	return rintf (9.49f * 16.f * UIConfiguration::instance ().get_ui_scale () * _face_zoom);
+}
+
+int
+RoutePropertiesBox::title_height () const
+{
+	return rintf (1.07f * 16.f * UIConfiguration::instance ().get_ui_scale ());
+}
+
+/* Spite: the Device view got taller or shorter (its pane divider): zoom the faces to fit */
+void
+RoutePropertiesBox::set_available_height (int h)
+{
+	float const base = 9.49f * 16.f * UIConfiguration::instance ().get_ui_scale ();
+	int const   fh   = std::max (48, h - title_height () - 12);
+	float const zoom = std::min (3.f, fh / base);
+	if (fabsf (zoom - _face_zoom) < 0.01f) {
+		return;
+	}
+	_face_zoom = zoom;
+	ARDOUR::set_lv2_ui_face_height (face_height ());
+	for (auto const& face : _faces) {
+		face->set_face_height (face_height ());
+	}
+	if (_device_faces && !(_proc_uis.empty () && _faces.empty ())) {
+		_box.set_size_request (-1, title_height () + face_height () + 4);
 	}
 }
 
@@ -329,6 +562,11 @@ RoutePropertiesBox::drop_route ()
 void
 RoutePropertiesBox::drop_plugin_uis ()
 {
+	for (auto const& face : _faces) {
+		face->release (); /* before the face leaves _box */
+	}
+	_faces.clear ();
+
 	std::list<Gtk::Widget*> children = _box.get_children ();
 	for (auto const& child : children) {
 		child->hide ();
@@ -359,6 +597,18 @@ RoutePropertiesBox::add_processor_to_display (std::weak_ptr<Processor> w)
 		return;
 	}
 #endif
+	if (_device_faces) {
+		/* Spite: PgD4S (plugdata for Spite) shows its own face */
+		std::shared_ptr<PluginInsert> pi  = std::dynamic_pointer_cast<PluginInsert> (pib);
+		std::shared_ptr<LV2Plugin>    lv2 = pi ? std::dynamic_pointer_cast<LV2Plugin> (pi->plugin ()) : std::shared_ptr<LV2Plugin> ();
+		if (lv2 && lv2->has_editor () && !lv2->is_external_ui () && std::string (lv2->uri ()).find ("https://github.com/timothyschoen/plugdata") == 0) {
+			ARDOUR::set_lv2_ui_face_height (face_height ());
+			DeviceFace* face = new DeviceFace (p, pib, lv2, face_height (), title_height ());
+			_faces.push_back (face);
+			_box.pack_start (*face, false, false);
+			return;
+		}
+	}
 	GenericPluginUI* plugin_ui = new GenericPluginUI (pib, true, true);
 	if (plugin_ui->empty ()) {
 		delete plugin_ui;
@@ -410,8 +660,12 @@ RoutePropertiesBox::refill_processors ()
 	}
 
 	_route->foreach_processor (sigc::mem_fun (*this, &RoutePropertiesBox::add_processor_to_display));
-	if (_proc_uis.empty ()) {
+	if (_proc_uis.empty () && _faces.empty ()) {
 		_scroller.hide ();
+	} else if (_device_faces) {
+		/* Spite: Live's proportions; generic devices fit the same height */
+		_box.set_size_request (-1, title_height () + face_height () + 4);
+		_scroller.show_all ();
 	} else {
 		float ui_scale = std::max<float> (1.f, UIConfiguration::instance().get_ui_scale());
 		int h = 100 * ui_scale;
