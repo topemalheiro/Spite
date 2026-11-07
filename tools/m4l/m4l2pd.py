@@ -648,10 +648,12 @@ def tab(b, xy, rect, face, conv):
                               None, 1, 1, pres))
             objs.append(note(items[k], (xy[0] + cx, xy[1] + cy + max(0, int((ch - 13) / 2))), int(cw), LIVE['text'], 1,
                              (pres[0], pres[1] + max(0, int((ch - 13) / 2))) if pres else None))
-    # the logic: a click (or a number into the inlet) selects, lights the cell, outputs index and name
+    # the logic: a click (or a number into the inlet) selects, lights the cell, outputs index and
+    # name. The cells are coloured through [s] objects: plugdata's Pd doesn't expand $0 in
+    # message boxes, so '; $0-...' messages would go nowhere.
     sub = ['#X obj 20 20 inlet;', '#X obj 20 160 t f f f;', '#X obj 20 400 outlet;', '#X obj 200 400 outlet;',
            '#X obj 300 200 sel %s;' % ' '.join(str(k) for k in range(n)),
-           '#X msg 500 240 %s;' % ' '.join('\\; \\$0-%s-c%d color %s #000000' % (tag, k, LIVE['cell']) for k in range(n)),
+           '#X msg 500 240 color %s #000000;' % LIVE['cell'],
            '#X obj 200 200 sel %s;' % ' '.join(str(k) for k in range(n)),
            '#X obj 20 60 loadbang;', '#X msg 20 90 %d;' % init, '#X obj 20 120 spigot %d;' % (1 if init_on else 0)]
     conns = [(0, 0, 1, 0), (1, 0, 2, 0), (1, 1, 6, 0), (1, 2, 4, 0), (7, 0, 8, 0), (8, 0, 9, 0), (9, 0, 1, 0)]
@@ -662,9 +664,13 @@ def tab(b, xy, rect, face, conv):
         conns += [(base + 2 * k, 0, base + 2 * k + 1, 0), (base + 2 * k + 1, 0, 1, 0)]
     base = len(sub)
     for k in range(n):
-        sub.append('#X msg %d 300 %s;' % (200 + 70 * k, item_msg(items[k])))
-        sub.append('#X msg %d 330 \\; \\$0-%s-c%d color %s #000000;' % (200 + 70 * k, tag, k, LIVE['cellon']))
-        conns += [(6, k, base + 2 * k, 0), (base + 2 * k, 0, 3, 0), (4, k, 5, 0), (4, k, base + 2 * k + 1, 0)]
+        x = 200 + 90 * k
+        sub.append('#X msg %d 300 %s;' % (x, item_msg(items[k])))
+        sub.append('#X msg %d 330 color %s #000000;' % (x, LIVE['cellon']))
+        sub.append('#X obj %d 360 s \\$0-%s-c%d;' % (x, tag, k))
+        name, on, send = base + 3 * k, base + 3 * k + 1, base + 3 * k + 2
+        # every cell off first (the shared message reaches all the [s]), then this one on
+        conns += [(6, k, name, 0), (name, 0, 3, 0), (4, k, 5, 0), (4, k, on, 0), (on, 0, send, 0), (5, 0, send, 0)]
     objs.append(PdObj(subpatch('%d %d' % (xy[0], xy[1] + int(h) + 12), tag, sub, conns),
                       text_bounds(xy[0], xy[1] + int(h) + 12, 'pd ' + tag), 1, 2))
     logic = len(objs) - 1
