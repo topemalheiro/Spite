@@ -553,6 +553,11 @@ LV2PluginUI::lv2ui_free()
 {
 	stop_updating (0);
 
+	/* Spite: removing the container destroys the plugin's X window along with its
+	 * parent, then the plugin destroys it again (JUCE does): trap the BadWindow that
+	 * follows, or GDK's handler takes Spite down at the next XSync */
+	gdk_error_trap_push ();
+
 	if (_gui_widget) {
 		remove (*_gui_widget);
 		_gui_widget = NULL;
@@ -562,6 +567,9 @@ LV2PluginUI::lv2ui_free()
 		suil_instance_free((SuilInstance*)_inst);
 		_inst = NULL;
 	}
+
+	gdk_flush ();
+	gdk_error_trap_pop ();
 }
 
 void

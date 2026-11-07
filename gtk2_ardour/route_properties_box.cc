@@ -147,11 +147,13 @@ public:
 	void set_face_height (int);
 
 protected:
-	void on_realize ();
+	void on_map ();
+	void on_unmap ();
 	void on_unrealize ();
 
 private:
 	bool idle_show_face ();
+	bool idle_hide_face ();
 	void gui_showing (PlugInsertBase*);
 	void gui_hidden (PlugInsertBase*);
 	bool title_press (GdkEventButton*);
@@ -168,6 +170,7 @@ private:
 	int                             _face_h;
 	float                           _scale;
 	sigc::connection                _idle;
+	sigc::connection                _unmap_idle;
 	sigc::connection                _showing_connection;
 	sigc::connection                _hidden_connection;
 	PBD::ScopedConnectionList       _connections;
@@ -240,17 +243,31 @@ void
 DeviceFace::release ()
 {
 	_idle.disconnect ();
+	_unmap_idle.disconnect ();
 	if (_ui->embed_active ()) {
 		_ui->embed_hide ();
 	}
 }
 
+/* The GUI lives while the face is on screen: created once it is mapped (OpenGL needs a
+ * shown window), freed soon after it is unmapped (another page, the Clip view), and at
+ * once on unrealize, before GTK could re-parent the live X11 GUI. */
 void
-DeviceFace::on_realize ()
+DeviceFace::on_map ()
 {
-	Gtk::VBox::on_realize ();
+	Gtk::VBox::on_map ();
+	_unmap_idle.disconnect ();
 	_idle.disconnect ();
 	_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
+}
+
+void
+DeviceFace::on_unmap ()
+{
+	_idle.disconnect ();
+	_unmap_idle.disconnect ();
+	_unmap_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_hide_face));
+	Gtk::VBox::on_unmap ();
 }
 
 void
@@ -261,9 +278,18 @@ DeviceFace::on_unrealize ()
 }
 
 bool
+DeviceFace::idle_hide_face ()
+{
+	if (!get_mapped ()) {
+		release ();
+	}
+	return false;
+}
+
+bool
 DeviceFace::idle_show_face ()
 {
-	if (!get_realized ()) {
+	if (!get_mapped ()) {
 		return false;
 	}
 	if (PluginUIWindow::custom_gui_shown (_pib.get ())) {
@@ -300,7 +326,7 @@ DeviceFace::gui_showing (PlugInsertBase* pib)
 void
 DeviceFace::gui_hidden (PlugInsertBase* pib)
 {
-	if (pib == _pib.get () && get_realized ()) {
+	if (pib == _pib.get () && get_mapped ()) {
 		_idle.disconnect ();
 		_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
 	}
