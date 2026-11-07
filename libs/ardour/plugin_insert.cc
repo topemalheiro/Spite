@@ -2751,6 +2751,17 @@ PluginInsert::set_state(const XMLNode& node, int version)
 
 	Processor::set_state (node, version);
 
+	/* Spite: plugdata is PgD4S (plugdata for Spite) now, with the same URIs. Sessions keep
+	 * each insert's name, so inserts still called after plugdata take its new name. */
+	if (unique_id.rfind ("https://github.com/timothyschoen/plugdata", 0) == 0) {
+		std::string const n = name ();
+		if (n.compare (0, 11, "plugdata-fx") == 0) {
+			set_name ("PgD4S-fx" + n.substr (11));
+		} else if (n.compare (0, 8, "plugdata") == 0) {
+			set_name ("PgD4S" + n.substr (8));
+		}
+	}
+
 	PBD::ID new_id = this->id();
 	PBD::ID old_id = this->id();
 
