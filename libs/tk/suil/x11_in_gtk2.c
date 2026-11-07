@@ -58,6 +58,14 @@ typedef struct {
 	SuilX11SizeHints            min_size;
 	bool                        query_wm;
 	bool                        embedded; /* Spite: inside a host page, not a plugin window */
+	/* Spite: a UI that gives the ui:resize extension follows its window. The host
+	   tells it each new size, and when it resizes itself the window follows */
+	const LV2UI_Resize*         ui_resize;      /* the UI's ui:resize extension */
+	int                         sent_width;     /* last size the UI was given */
+	int                         sent_height;
+	int                         pending_width;  /* window size asked for on the UI's behalf */
+	int                         pending_height;
+	guint                       pending_id;     /* gives up on that size */
 } SuilX11Wrapper;
 
 typedef struct {
@@ -121,6 +129,32 @@ get_parent_window(Display* display, Window child)
 	return (parent == root) ? 0 : parent;
 }
 
+/* Spite: forget the window size asked for on the UI's behalf */
+static void
+clear_pending(SuilX11Wrapper* wrap)
+{
+	if (wrap->pending_id) {
+		g_source_remove(wrap->pending_id);
+		wrap->pending_id = 0;
+	}
+	wrap->pending_width  = 0;
+	wrap->pending_height = 0;
+}
+
+/* Spite: true for a UI that follows its window: it gives the ui:resize extension
+   and sits in a resizable window of its own, not in a host page */
+static bool
+follows_window(SuilX11Wrapper* wrap)
+{
+	if (wrap->embedded || !wrap->ui_resize || !wrap->ui_resize->ui_resize
+	    || !wrap->instance || !wrap->instance->handle) {
+		return false;
+	}
+
+	GtkWidget* top = gtk_widget_get_toplevel(GTK_WIDGET(wrap));
+	return GTK_IS_WINDOW(top) && gtk_window_get_resizable(GTK_WINDOW(top));
+}
+
 static gboolean
 on_plug_removed(GtkSocket* sock, gpointer data)
 {
@@ -132,6 +166,9 @@ on_plug_removed(GtkSocket* sock, gpointer data)
 		g_source_remove(self->idle_id);
 		self->idle_id = 0;
 	}
+
+	clear_pending(self);
+	self->ui_resize = NULL;
 
 	if (self->instance->handle) {
 		self->instance->descriptor->cleanup(self->instance->handle);
@@ -147,6 +184,7 @@ suil_x11_wrapper_finalize(GObject* gobject)
 {
 	SuilX11Wrapper* const self = SUIL_X11_WRAPPER(gobject);
 
+	clear_pending(self);
 	self->wrapper->impl = NULL;
 
 	G_OBJECT_CLASS(suil_x11_wrapper_parent_class)->finalize(gobject);
@@ -299,12 +337,78 @@ query_wm_hints(SuilX11Wrapper* wrap)
 	wrap->query_wm = false;
 }
 
+/* Spite: true when the UI's X size hints pin it to a single size. JUCE pins them
+   to the editor's current size, whatever the editor allows, so a UI that follows
+   its window ignores such hints */
+static bool
+hints_pinned(SuilX11Wrapper* wrap)
+{
+	return wrap->min_size.is_set && wrap->max_size.is_set
+	       && wrap->min_size.width == wrap->max_size.width
+	       && wrap->min_size.height == wrap->max_size.height;
+}
+
+/* Spite: a UI that follows its window fills the allocation (within the size
+   limits it really has) and is told its new size, which it fits itself to:
+   JUCE's editor only follows its window this way */
+static void
+resize_to_window(SuilX11Wrapper* socket,
+                 GtkAllocation*  allocation)
+{
+	GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(socket->plug));
+	int        width  = MAX(allocation->width, 1);
+	int        height = MAX(allocation->height, 1);
+
+	if (socket->query_wm) {
+		query_wm_hints(socket);
+	}
+
+	if (!hints_pinned(socket)) {
+		if (socket->max_size.is_set) {
+			width  = MIN(width, socket->max_size.width);
+			height = MIN(height, socket->max_size.height);
+		}
+		if (socket->min_size.is_set) {
+			width  = MAX(width, socket->min_size.width);
+			height = MAX(height, socket->min_size.height);
+		}
+	}
+
+	if (socket->pending_width) {
+		if (width != socket->pending_width || height != socket->pending_height) {
+			/* The window hasn't caught up with the size the UI gave itself:
+			   don't size the UI back */
+			return;
+		}
+		clear_pending(socket);
+		socket->sent_width  = width;
+		socket->sent_height = height;
+	}
+
+	XMoveResizeWindow(GDK_WINDOW_XDISPLAY(window),
+	                  (Window)socket->instance->ui_widget,
+	                  MAX(0, (allocation->width - width) / 2),
+	                  MAX(0, (allocation->height - height) / 2),
+	                  (unsigned)width, (unsigned)height);
+
+	if (width != socket->sent_width || height != socket->sent_height) {
+		socket->sent_width  = width;
+		socket->sent_height = height;
+		socket->ui_resize->ui_resize(socket->instance->handle, width, height);
+	}
+}
+
 static void
 forward_size_request(SuilX11Wrapper* socket,
                      GtkAllocation*  allocation)
 {
 	GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(socket->plug));
 	if (x_window_is_valid(socket)) {
+		if (follows_window(socket)) {
+			resize_to_window(socket, allocation);
+			return;
+		}
+
 		// Calculate allocation size constrained to X11 limits for widget
 		int        width  = allocation->width;
 		int        height = allocation->height;
@@ -405,6 +509,18 @@ suil_x11_on_map_event(GtkWidget* widget, GdkEvent* event)
 
 	SuilX11Wrapper* const self = SUIL_X11_WRAPPER(widget);
 
+	/* Spite: a UI that follows its window opens at the size it asked for, then
+	   lets the user make the window smaller too (the UI keeps its own minimum
+	   and is clipped below it) */
+	if (follows_window(self)) {
+		const bool min = self->min_size.is_set && !hints_pinned(self);
+		g_object_set(G_OBJECT(GTK_WIDGET(self)),
+		             "width-request", min ? MAX(self->min_size.width, 1) : 64,
+		             "height-request", min ? MAX(self->min_size.height, 1) : 64,
+		             NULL);
+		return;
+	}
+
 	/* Reset the size request to the minimum sizes.  This is called after the
 	   initial size negotiation, where Gtk called suil_x11_on_size_request() to
 	   get the size request, which might be bigger than the minimum size.
@@ -451,12 +567,64 @@ suil_x11_wrapper_init(SuilX11Wrapper* self)
 	self->min_size    = (SuilX11SizeHints){false, 0, 0};
 	self->query_wm    = true;
 	self->embedded    = false;
+	self->ui_resize   = NULL;
+	self->sent_width     = 0;
+	self->sent_height    = 0;
+	self->pending_width  = 0;
+	self->pending_height = 0;
+	self->pending_id     = 0;
+}
+
+/* Spite: the window didn't take the size the UI gave itself (it is maximised, or
+   the window manager said no): give the UI the window's size again */
+static gboolean
+pending_expired(gpointer data)
+{
+	SuilX11Wrapper* const wrap = SUIL_X11_WRAPPER(data);
+
+	wrap->pending_id     = 0;
+	wrap->pending_width  = 0;
+	wrap->pending_height = 0;
+	wrap->sent_width     = 0;
+	wrap->sent_height    = 0;
+	gtk_widget_queue_resize(GTK_WIDGET(wrap));
+	return FALSE;
 }
 
 static int
 wrapper_resize(LV2UI_Feature_Handle handle, int width, int height)
 {
 	SuilX11Wrapper* const wrap = SUIL_X11_WRAPPER(handle);
+
+	/* Spite: a UI that follows its window and resizes itself (plugdata's corner)
+	   takes the window along */
+	if (width > 0 && height > 0
+	    && gtk_widget_get_mapped(GTK_WIDGET(wrap)) && follows_window(wrap)) {
+		GtkAllocation a;
+		gtk_widget_get_allocation(GTK_WIDGET(wrap), &a);
+
+		wrap->sent_width  = width;
+		wrap->sent_height = height;
+		wrap->query_wm    = true;  // it may have new size limits
+
+		if (width == a.width && height == a.height) {
+			clear_pending(wrap);
+			return 0;
+		}
+
+		GtkWindow* top = GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(wrap)));
+		int        tw  = 0;
+		int        th  = 0;
+		gtk_window_get_size(top, &tw, &th);
+
+		clear_pending(wrap);
+		wrap->pending_width  = width;
+		wrap->pending_height = height;
+		wrap->pending_id     = g_timeout_add(500, pending_expired, wrap);
+
+		gtk_window_resize(top, MAX(1, tw + width - a.width), MAX(1, th + height - a.height));
+		return 0;
+	}
 
 	wrap->custom_size.width  = width;
 	wrap->custom_size.height = height;
@@ -528,6 +696,12 @@ wrapper_wrap(SuilWrapper*  wrapper,
 		wrap->idle_iface = idle_iface;
 		wrap->idle_id    = g_timeout_add(
 			wrap->idle_ms, suil_x11_wrapper_idle, wrap);
+	}
+
+	/* Spite: the UI's ui:resize extension, for telling it the size of its window */
+	if (instance->descriptor->extension_data) {
+		wrap->ui_resize = (const LV2UI_Resize*)
+			instance->descriptor->extension_data(LV2_UI__resize);
 	}
 
 	g_signal_connect(G_OBJECT(wrap),
