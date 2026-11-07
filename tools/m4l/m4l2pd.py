@@ -172,6 +172,7 @@ PD_OUTLETS = {
     'live.text': 1, 'live.toggle': 1, 'live.button': 1,
     'dial': 1, 'live.thisdevice': 1, 'slider': 1, 'toggle': 1, 'button': 1, 'pattr': 1,
     'live.colors': 1,
+    'midiparse': 7,  # cyclone's has no 8th (raw midievent) outlet
 }
 
 
