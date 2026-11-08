@@ -951,10 +951,10 @@ TriggerPage::show_clip_view ()
 
 	hide_all ();
 
-	/* Spite: leave the Device view, letting go of its plugin UIs */
+	/* Spite: leave the Device view. Its faces stay, GUIs and all (see
+	 * DeviceFace::on_map), so coming back is instant */
 	_device_box.hide ();
 	_device_empty_label.hide ();
-	_device_box.set_route (std::shared_ptr<Route> ());
 	_properties_box.show ();
 
 	Tabbable::showhide_att_bottom (false);

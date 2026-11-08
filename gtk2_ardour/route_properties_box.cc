@@ -284,9 +284,13 @@ DeviceFace::release ()
 	}
 }
 
-/* The GUI lives while the face is on screen: created once it is mapped (OpenGL needs a
- * shown window), freed soon after it is unmapped (another page, the Clip view), and at
- * once on unrealize, before GTK could re-parent the live X11 GUI. */
+/* The GUI is made once the face is mapped (OpenGL needs a shown window) and then kept,
+ * because making a PgD4S GUI takes a moment and can stall the audio while it builds its
+ * patch. Hiding the Device view (the Clip view, another page) doesn't unmap the faces,
+ * since they sit in a viewport, which only hides its own window: the GUIs stay, PgD4S
+ * stops drawing while its window can't be seen, and coming back is instant. A face that
+ * does get unmapped frees its GUI after two minutes; it frees it at once on unrealize,
+ * before GTK could re-parent the live X11 GUI. */
 void
 DeviceFace::on_map ()
 {
@@ -301,7 +305,10 @@ DeviceFace::on_unmap ()
 {
 	_idle.disconnect ();
 	_unmap_idle.disconnect ();
-	_unmap_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_hide_face));
+	_unmap_idle = Glib::signal_timeout ().connect_seconds (sigc::mem_fun (*this, &DeviceFace::idle_hide_face), 120);
+	if (_ui->embed_active ()) {
+		_ui->stop_updating (0); /* nothing shows it */
+	}
 	Gtk::VBox::on_unmap ();
 }
 
@@ -315,7 +322,8 @@ DeviceFace::on_unrealize ()
 bool
 DeviceFace::idle_hide_face ()
 {
-	if (!get_mapped ()) {
+	if (!get_mapped () && _ui->embed_active ()) {
+		spite_cue_log (string_compose ("face %1: hidden for two minutes", _name.get_text ()));
 		release ();
 	}
 	return false;
@@ -334,6 +342,11 @@ DeviceFace::idle_show_face ()
 	}
 	_placeholder.hide ();
 	_ui->show ();
+	if (_ui->embed_active ()) {
+		_ui->embed_show (); /* its GUI was kept: updates resume */
+		spite_cue_log (string_compose ("face %1: shown again, GUI kept", _name.get_text ()));
+		return false;
+	}
 	gint64 const t0 = g_get_monotonic_time ();
 	_ui->embed_show ();
 	spite_cue_log (string_compose ("face %1: GUI made in %2 ms", _name.get_text (), (g_get_monotonic_time () - t0) / 1000));
