@@ -107,6 +107,8 @@ private:
 	void set_bottom_mode (BottomMode, bool by_user);
 	void bottom_mode_action (BottomMode);
 	void toggle_clip_device_view ();
+	void remember_bottom_size ();
+	bool apply_bottom_size ();
 	void bottom_size_allocate (Gtk::Allocation&);
 	bool apply_face_height ();
 	void refresh_bottom ();
@@ -174,9 +176,12 @@ private:
 
 	/* Spite: Device view */
 	BottomMode                   _bottom_mode;
-	float                      _pane_pos[2]; /* the bottom pane's divider for the Clip and the Device view */
-	int                        _bottom_h;
-	sigc::connection           _face_idle;
+	float                        _clip_pane_pos; /* the Clip view's height: the bottom pane's divider */
+	float                        _device_zoom;   /* the Device view's height: its faces' zoom, 1 is Live's size */
+	bool                         _bottom_size_pending; /* the pane gets the view's height once laid out */
+	int                          _bottom_h;
+	sigc::connection             _face_idle;
+	sigc::connection             _bottom_size_idle;
 	bool                         _setting_bottom_mode;
 	RoutePropertiesBox           _device_box;
 	Gtk::Label                   _device_empty_label;

@@ -59,6 +59,10 @@ public:
 	void set_device_faces (bool);
 	/* the height the Device view has: faces zoom to fit it */
 	void set_available_height (int);
+	float face_zoom () const { return _face_zoom; }
+	/* the Device view's height for a face zoom, and the least it can have */
+	int height_for_zoom (float) const;
+	int min_height () const;
 
 private:
 	void property_changed (const PBD::PropertyChange& what_changed);
@@ -93,6 +97,7 @@ private:
 
 	int face_height () const;
 	int title_height () const;
+	int face_overhead () const;
 
 	int _idle_refill_processors_id;
 

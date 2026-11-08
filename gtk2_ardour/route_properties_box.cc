@@ -541,12 +541,36 @@ RoutePropertiesBox::title_height () const
 	return rintf (1.07f * 16.f * UIConfiguration::instance ().get_ui_scale ());
 }
 
+/* what the Device view needs besides the faces: their title bars, the box's
+ * 4 px, and the room the scroller always asks for its scrollbar. Leaving any
+ * of it out makes the faces ask for more than they get, and the pane grows
+ * the view to give it to them, again and again. */
+int
+RoutePropertiesBox::face_overhead () const
+{
+	int const scroller = _scroller.size_request ().height - _box.size_request ().height;
+	return title_height () + 4 + std::max (0, scroller);
+}
+
+int
+RoutePropertiesBox::height_for_zoom (float zoom) const
+{
+	float const base = 9.49f * 16.f * UIConfiguration::instance ().get_ui_scale ();
+	return face_overhead () + std::max (48, (int) rintf (base * std::min (3.f, zoom)));
+}
+
+int
+RoutePropertiesBox::min_height () const
+{
+	return face_overhead () + 48;
+}
+
 /* Spite: the Device view got taller or shorter (its pane divider): zoom the faces to fit */
 void
 RoutePropertiesBox::set_available_height (int h)
 {
 	float const base = 9.49f * 16.f * UIConfiguration::instance ().get_ui_scale ();
-	int const   fh   = std::max (48, h - title_height () - 12);
+	int const   fh   = std::max (48, h - face_overhead ());
 	float const zoom = std::min (3.f, fh / base);
 	if (fabsf (zoom - _face_zoom) < 0.01f) {
 		return;

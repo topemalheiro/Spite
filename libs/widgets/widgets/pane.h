@@ -71,6 +71,8 @@ public:
 	float get_absolute_divider (std::vector<float>::size_type divider = 0) const;
 	void set_child_minsize (Gtk::Widget const &, int32_t);
 	void set_absolute_divider (std::vector<float>::size_type divider, DividerMode mode, float size);
+	/* the space each divider takes, to place one for a child size in pixels */
+	int divider_size () const { return divider_width; }
 
 	GType child_type_vfunc() const;
 	void set_drag_cursor (Gdk::Cursor);
