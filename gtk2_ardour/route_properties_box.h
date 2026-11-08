@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include <ytkmm/box.h>
@@ -39,6 +40,10 @@ namespace ARDOUR {
 
 class GenericPluginUI;
 class ProcessorBox;
+
+/* Spite: a log of the Cue page's bottom panel sizes and its device faces' GUIs,
+ * written afresh each run to cue-layout.log in Spite's cache folder */
+void spite_cue_log (std::string const&);
 
 class RoutePropertiesBox : public Gtk::HBox, public ARDOUR::SessionHandlePtr
 {
@@ -62,6 +67,7 @@ public:
 	float face_zoom () const { return _face_zoom; }
 	/* the Device view's height for a face zoom, and the least it can have */
 	int height_for_zoom (float) const;
+	float zoom_for_height (int) const;
 	int min_height () const;
 
 private:

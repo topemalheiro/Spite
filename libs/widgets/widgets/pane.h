@@ -74,6 +74,9 @@ public:
 	/* the space each divider takes, to place one for a child size in pixels */
 	int divider_size () const { return divider_width; }
 
+	/* the user let go of a divider they dragged (its index) */
+	sigc::signal<void, std::vector<float>::size_type> DividerDragged;
+
 	GType child_type_vfunc() const;
 	void set_drag_cursor (Gdk::Cursor);
 

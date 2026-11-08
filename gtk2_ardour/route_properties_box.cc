@@ -43,8 +43,12 @@
 #include "timers.h"
 #include "ui_config.h"
 
+#include "ardour/filesystem_paths.h"
 #include "ardour/lv2_plugin.h"
 #include "ardour/plugin_insert.h"
+
+#include <fstream>
+#include <glibmm/miscutils.h>
 
 #ifdef GDK_WINDOWING_X11
 #include <ydk/gdkx.h>
@@ -180,6 +184,32 @@ private:
 	PBD::ScopedConnectionList       _connections;
 };
 
+void
+spite_cue_log (std::string const& msg)
+{
+	static std::ofstream* out   = 0;
+	static bool           tried = false;
+	if (!tried) {
+		tried = true;
+		std::string const path = Glib::build_filename (ARDOUR::user_cache_directory (), X_("cue-layout.log"));
+		out = new std::ofstream (path.c_str (), std::ios::out | std::ios::trunc);
+		if (!out->is_open ()) {
+			delete out;
+			out = 0;
+		}
+	}
+	if (!out) {
+		return;
+	}
+	GDateTime* now = g_date_time_new_now_local ();
+	gchar*     hms = g_date_time_format (now, "%H:%M:%S");
+	char       ms[16];
+	snprintf (ms, sizeof (ms), ".%03d ", g_date_time_get_microsecond (now) / 1000);
+	*out << hms << ms << msg << std::endl;
+	g_free (hms);
+	g_date_time_unref (now);
+}
+
 /* the device's name, as Live shows it: a converted Max for Live device's own name (its preset
  * is "M4L: <name>"), else the processor's name */
 static std::string
@@ -249,6 +279,7 @@ DeviceFace::release ()
 	_idle.disconnect ();
 	_unmap_idle.disconnect ();
 	if (_ui->embed_active ()) {
+		spite_cue_log (string_compose ("face %1: GUI freed", _name.get_text ()));
 		_ui->embed_hide ();
 	}
 }
@@ -303,7 +334,9 @@ DeviceFace::idle_show_face ()
 	}
 	_placeholder.hide ();
 	_ui->show ();
+	gint64 const t0 = g_get_monotonic_time ();
 	_ui->embed_show ();
+	spite_cue_log (string_compose ("face %1: GUI made in %2 ms", _name.get_text (), (g_get_monotonic_time () - t0) / 1000));
 	return false;
 }
 
@@ -572,16 +605,23 @@ RoutePropertiesBox::min_height () const
 	return face_overhead () + 48;
 }
 
+float
+RoutePropertiesBox::zoom_for_height (int h) const
+{
+	float const base = 9.49f * 16.f * UIConfiguration::instance ().get_ui_scale ();
+	int const   fh   = std::max (48, h - face_overhead ());
+	return std::min (3.f, fh / base);
+}
+
 /* Spite: the Device view got taller or shorter (its pane divider): zoom the faces to fit */
 void
 RoutePropertiesBox::set_available_height (int h)
 {
-	float const base = 9.49f * 16.f * UIConfiguration::instance ().get_ui_scale ();
-	int const   fh   = std::max (48, h - face_overhead ());
-	float const zoom = std::min (3.f, fh / base);
+	float const zoom = zoom_for_height (h);
 	if (fabsf (zoom - _face_zoom) < 0.01f) {
 		return;
 	}
+	spite_cue_log (string_compose ("faces: %1 px -> zoom %2 (was %3)", h, zoom, _face_zoom));
 	_face_zoom = zoom;
 	ARDOUR::set_lv2_ui_face_height (face_height ());
 	for (auto const& face : _faces) {
@@ -784,6 +824,9 @@ RoutePropertiesBox::refill_processors ()
 	}
 
 	_route->foreach_processor (sigc::mem_fun (*this, &RoutePropertiesBox::add_processor_to_display));
+	if (_device_faces) {
+		spite_cue_log (string_compose ("devices of %1: %2 faces, %3 other devices", _route->name (), _faces.size (), _proc_uis.size ()));
+	}
 	if (_proc_uis.empty () && _faces.empty ()) {
 		_scroller.hide ();
 	} else if (_device_faces) {

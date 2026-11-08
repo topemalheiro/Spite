@@ -447,11 +447,20 @@ Pane::handle_press_event (GdkEventButton* ev, Divider* d)
 bool
 Pane::handle_release_event (GdkEventButton* ev, Divider* d)
 {
+	bool const was_dragging = d->dragging;
 	d->dragging = false;
 
 	if (did_move && !children.empty()) {
 		children.front()->w->queue_resize ();
 		did_move = false;
+	}
+
+	if (was_dragging) {
+		Dividers::size_type div = 0;
+		for (Dividers::const_iterator di = dividers.begin (); di != dividers.end () && *di != d; ++di) {
+			++div;
+		}
+		DividerDragged (div); /* EMIT SIGNAL */
 	}
 
 	return false;

@@ -81,6 +81,8 @@ TriggerPage::TriggerPage ()
 	, _clip_pane_pos (0.6f) /* the clip editor needs room */
 	, _device_zoom (1.f)    /* Live's device height */
 	, _bottom_size_pending (false)
+	, _bottom_pane_h (0)
+	, _bottom_minsize (-1)
 	, _bottom_h (0)
 	, _setting_bottom_mode (false)
 	, _selection (*this, *this)
@@ -196,6 +198,9 @@ TriggerPage::TriggerPage ()
 	_device_box.set_device_faces (true);
 	/* Spite: the Device view's height (its pane divider) sets the faces' zoom */
 	content_att_bottom.signal_size_allocate ().connect (sigc::mem_fun (*this, &TriggerPage::bottom_size_allocate));
+	/* Spite: each view keeps its own height, see apply_bottom_size () */
+	content_bottom_pane.signal_size_allocate ().connect (sigc::mem_fun (*this, &TriggerPage::bottom_pane_allocate));
+	content_bottom_pane.DividerDragged.connect (sigc::mem_fun (*this, &TriggerPage::bottom_divider_dragged));
 	_device_box.set_no_show_all ();
 	_device_empty_label.set_text (_("No track selected. Click a track's name to see its devices."));
 	_device_empty_label.set_alignment (0.5, 0.5);
@@ -321,9 +326,9 @@ TriggerPage::get_state () const
 
 	/* Spite: Clip or Device view */
 	node->set_property (X_("bottom-mode"), std::string (_bottom_mode == DeviceMode ? X_("device") : X_("clip")));
-	const_cast<TriggerPage*> (this)->remember_bottom_size ();
 	node->set_property (X_("clip-pane-pos"), _clip_pane_pos);
-	node->set_property (X_("device-zoom"), _device_zoom);
+	node->set_property (X_("device-view-zoom"), _device_zoom);
+	spite_cue_log (string_compose ("state saved: %1 view, clip divider %2, device zoom %3", _bottom_mode == DeviceMode ? "device" : "clip", _clip_pane_pos, _device_zoom));
 
 	return *node;
 }
@@ -389,16 +394,31 @@ TriggerPage::set_state (const XMLNode& node, int version)
 		tact->set_active (yn);
 	}
 
-	/* Spite: Clip or Device view, each with its own height. The Device view's
-	 * old "device-pane-pos" is left out: it had grown to the Clip view's */
+	/* Spite: Clip or Device view, each with its own height. Earlier builds'
+	 * "device-pane-pos" and "device-zoom" are left out: those had grown to the
+	 * Clip view's height */
 	node.get_property (X_("clip-pane-pos"), _clip_pane_pos);
-	node.get_property (X_("device-zoom"), _device_zoom);
+	node.get_property (X_("device-view-zoom"), _device_zoom);
+	BottomMode  m = _bottom_mode;
 	std::string mode;
 	if (node.get_property (X_("bottom-mode"), mode)) {
-		set_bottom_mode (mode == X_("device") ? DeviceMode : ClipMode, false);
+		m = (mode == X_("device") ? DeviceMode : ClipMode);
+	}
+	spite_cue_log (string_compose ("state loaded: %1 view, clip divider %2, device zoom %3", m == DeviceMode ? "device" : "clip", _clip_pane_pos, _device_zoom));
+
+	/* this puts back the divider the page had when it was saved, which is just
+	 * the height of the view showing then ... */
+	int const rv = Tabbable::set_state (node, version);
+	spite_cue_log (string_compose ("  the page's saved divider put back: %1", content_bottom_pane.get_divider ()));
+
+	/* ... so each view's own height goes in after it */
+	if (m != _bottom_mode) {
+		set_bottom_mode (m, false);
+	} else {
+		apply_bottom_size ();
 	}
 
-	return Tabbable::set_state (node, version);
+	return rv;
 }
 
 void
@@ -690,8 +710,7 @@ TriggerPage::set_bottom_mode (BottomMode m, bool by_user)
 {
 	bool const changed = (m != _bottom_mode);
 	if (changed) {
-		/* each view keeps its own height: Live-sized devices, a taller clip editor */
-		remember_bottom_size ();
+		spite_cue_log (string_compose ("%1 view -> %2 view%3", _bottom_mode == DeviceMode ? "device" : "clip", m == DeviceMode ? "device" : "clip", by_user ? " (asked for)" : ""));
 	}
 	_bottom_mode = m;
 
@@ -716,41 +735,43 @@ TriggerPage::set_bottom_mode (BottomMode m, bool by_user)
 	}
 
 	if (changed) {
-		_bottom_size_idle.disconnect ();
 		apply_bottom_size ();
 	}
 }
 
-/* Spite: keep the height of the view being left. The Device view's is kept
- * as it changes, as its faces' zoom (apply_face_height). */
-void
-TriggerPage::remember_bottom_size ()
-{
-	if (_bottom_mode != ClipMode || _bottom_size_pending || content_bottom_pane.get_allocation ().get_height () <= 1) {
-		/* not laid out yet: the divider is not the Clip view's */
-		return;
-	}
-	_clip_pane_pos = content_bottom_pane.get_divider ();
-}
-
-/* Spite: give the bottom pane the height of the view it shows */
+/* Spite: give the bottom pane the height of the view it shows. Nothing but the
+ * user dragging the divider changes a view's height (bottom_divider_dragged):
+ * whatever else moves the divider, from a saved layout to the clip editor
+ * asking for room, the view gets its own height back here. */
 bool
 TriggerPage::apply_bottom_size ()
 {
 	int const total = content_bottom_pane.get_allocation ().get_height ();
 	if (total <= 1 || !content_att_bottom.get_visible ()) {
-		/* once the pane is laid out with the panel showing (bottom_size_allocate) */
+		/* once the pane is laid out with the panel showing (bottom_pane_allocate) */
+		if (!_bottom_size_pending) {
+			spite_cue_log ("  the panel isn't laid out yet: its height goes in once it is");
+		}
 		_bottom_size_pending = true;
 		return false;
 	}
 	_bottom_size_pending = false;
+	_bottom_pane_h = total;
+
+	float const before = content_bottom_pane.get_divider ();
+
+	/* the faces zoom to fit the Device view, so their size must not hold the
+	 * divider: it can go down again after they have grown */
+	int const minsize = (_bottom_mode == DeviceMode) ? _device_box.min_height () : 0;
+	if (minsize != _bottom_minsize) {
+		_bottom_minsize = minsize;
+		content_bottom_pane.set_child_minsize (content_att_bottom, minsize);
+		content_bottom_pane.queue_resize ();
+	}
 
 	if (_bottom_mode == DeviceMode) {
-		/* the faces zoom to fit the panel, so their size must not hold the
-		 * divider: it can go down again after the faces have grown */
-		content_bottom_pane.set_child_minsize (content_att_bottom, _device_box.min_height ());
 		float const space = total - content_bottom_pane.divider_size ();
-		float const want  = _device_box.height_for_zoom (_device_zoom);
+		int const   want  = _device_box.height_for_zoom (_device_zoom);
 		if (space > 0) {
 			/* the pane gives the top child floor (space * fract) */
 			content_bottom_pane.set_divider (0, 1.f - (want - .5f) / space);
@@ -758,20 +779,48 @@ TriggerPage::apply_bottom_size ()
 		/* and the faces their zoom, even if the pane kept its height */
 		_face_idle.disconnect ();
 		_face_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &TriggerPage::apply_face_height));
+		spite_cue_log (string_compose ("  device view: zoom %1 is %2 px of the pane's %3, divider %4 -> %5", _device_zoom, want, total, before, content_bottom_pane.get_divider ()));
 	} else {
-		content_bottom_pane.set_child_minsize (content_att_bottom, 0);
 		content_bottom_pane.set_divider (0, _clip_pane_pos);
+		spite_cue_log (string_compose ("  clip view: divider %1 -> %2 (its own %3)", before, content_bottom_pane.get_divider (), _clip_pane_pos));
 	}
-	content_bottom_pane.queue_resize ();
 	return false;
+}
+
+/* Spite: the pane got laid out, or its height changed (the window was resized) */
+void
+TriggerPage::bottom_pane_allocate (Gtk::Allocation& a)
+{
+	if (a.get_height () <= 1) {
+		return;
+	}
+	if (_bottom_size_pending) {
+		spite_cue_log (string_compose ("pane laid out: %1 px", a.get_height ()));
+		apply_bottom_size ();
+	} else if (_bottom_mode == DeviceMode && a.get_height () != _bottom_pane_h) {
+		/* the Device view keeps its height in pixels, like Live's */
+		spite_cue_log (string_compose ("pane %1 -> %2 px", _bottom_pane_h, a.get_height ()));
+		apply_bottom_size ();
+	}
+}
+
+/* Spite: the user dragged the divider: the view showing keeps that height */
+void
+TriggerPage::bottom_divider_dragged (std::vector<float>::size_type)
+{
+	int const h = content_att_bottom.get_allocation ().get_height ();
+	if (_bottom_mode == DeviceMode) {
+		_device_zoom = _device_box.zoom_for_height (h);
+		spite_cue_log (string_compose ("divider dragged: device view %1 px, zoom %2", h, _device_zoom));
+	} else {
+		_clip_pane_pos = content_bottom_pane.get_divider ();
+		spite_cue_log (string_compose ("divider dragged: clip view %1 px, divider %2", h, _clip_pane_pos));
+	}
 }
 
 void
 TriggerPage::bottom_size_allocate (Gtk::Allocation& a)
 {
-	if (_bottom_size_pending && !_bottom_size_idle.connected ()) {
-		_bottom_size_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &TriggerPage::apply_bottom_size), Glib::PRIORITY_HIGH_IDLE);
-	}
 	if (a.get_height () == _bottom_h) {
 		return;
 	}
@@ -787,7 +836,6 @@ TriggerPage::apply_face_height ()
 	/* not while the pane still has the height it had before the Device view */
 	if (_bottom_mode == DeviceMode && _bottom_h > 0 && !_bottom_size_pending) {
 		_device_box.set_available_height (_bottom_h);
-		_device_zoom = _device_box.face_zoom ();
 	}
 	return false;
 }
