@@ -54,6 +54,7 @@
 #include "ardour/panner_manager.h"
 #include "ardour/panner_shell.h"
 #include "ardour/profile.h"
+#include "ardour/route.h"
 #include "ardour/session.h"
 #include "ardour/speakers.h"
 
@@ -121,7 +122,23 @@ PannerShell::configure_io (ChanCount in, ChanCount out)
 		return;
 	}
 
-	PannerInfo* pi = PannerManager::instance().select_panner (in, out, _user_selected_panner_uri);
+	std::string uri = _user_selected_panner_uri;
+	if (PannerManager::stereo_pairs (nins, nouts)) {
+		/* Spite: in a stereo session, a track with more channels (PgD4S using all 32 of its outputs)
+		 * gets the normal stereo panner, on each pair, instead of VBAP's circle, unless VBAP was
+		 * picked for it in the panner's menu. A surround master keeps VBAP. */
+		std::shared_ptr<Route> master = _session.master_out ();
+		uint32_t const n_mix = master ? master->n_inputs ().n_audio () : _session.get_speakers ()->size ();
+		PannerInfo* chosen = uri.empty () ? 0 : PannerManager::instance ().get_by_uri (uri);
+		bool const chosen_fits = chosen
+			&& (chosen->descriptor.in == -1 || chosen->descriptor.in == (int32_t) nins)
+			&& (chosen->descriptor.out == -1 || chosen->descriptor.out == (int32_t) nouts);
+		if (n_mix <= 2 && !chosen_fits) {
+			uri = PannerManager::balance_uri ();
+		}
+	}
+
+	PannerInfo* pi = PannerManager::instance().select_panner (in, out, uri);
 	if (!pi) {
 		fatal << _("No panner found: check that panners are being discovered correctly during startup.") << endmsg;
 		abort(); /*NOTREACHED*/

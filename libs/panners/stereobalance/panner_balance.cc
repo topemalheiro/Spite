@@ -43,6 +43,7 @@
 #include "ardour/mix.h"
 #include "ardour/pan_controllable.h"
 #include "ardour/pannable.h"
+#include "ardour/panner_manager.h"
 #include "ardour/runtime_functions.h"
 #include "ardour/session.h"
 #include "ardour/utils.h"
@@ -74,6 +75,8 @@ panner_descriptor ()
 
 Pannerbalance::Pannerbalance (std::shared_ptr<Pannable> p)
 	: Panner (p)
+	, _n_in (2)
+	, _n_out (2)
 {
 	if (!_pannable->has_state ()) {
 		_pannable->pan_azimuth_control->set_value (0.5, Controllable::NoGroup);
@@ -82,17 +85,40 @@ Pannerbalance::Pannerbalance (std::shared_ptr<Pannable> p)
 	_can_automate_list.insert (Evoral::Parameter (PanAzimuthAutomation));
 
 	update ();
-
-	/* LEFT SIGNAL */
-	pos_interp[0] = pos[0] = desired_pos[0];
-	/* RIGHT SIGNAL */
-	pos_interp[1] = pos[1] = desired_pos[1];
+	reset_glide ();
 
 	_pannable->pan_azimuth_control->Changed.connect_same_thread (*this, std::bind (&Pannerbalance::update, this));
 }
 
 Pannerbalance::~Pannerbalance ()
 {
+}
+
+void
+Pannerbalance::reset_glide ()
+{
+	/* input 0 is left, 1 right; with more, odd inputs are left and even right (counting from 1) */
+	pos.assign (_n_in, 1.f);
+	pos_interp.assign (_n_in, 1.f);
+	for (uint32_t i = 0; i < _n_in; ++i) {
+		pos_interp[i] = pos[i] = desired_pos[i % 2];
+	}
+}
+
+void
+Pannerbalance::configure_io (ChanCount in, ChanCount out)
+{
+	/* Spite: called on a new panner, with the process lock held */
+	uint32_t const n_in  = in.n_audio ();
+	uint32_t const n_out = out.n_audio ();
+	if (PannerManager::stereo_pairs (n_in, n_out)) {
+		_n_in  = n_in;
+		_n_out = n_out;
+	} else {
+		_n_in  = 2;
+		_n_out = 2;
+	}
+	reset_glide ();
 }
 
 double
@@ -155,7 +181,14 @@ Pannerbalance::position_range () const
 void
 Pannerbalance::distribute_one (AudioBuffer& srcbuf, BufferSet& obufs, gain_t gain_coeff, pframes_t nframes, uint32_t which)
 {
-	assert (obufs.count ().n_audio () == 2);
+	/* Spite: an input pans as its side (which % 2). With as many outputs as inputs it goes to its
+	 * own output, with two outputs it's mixed into its side's. Stereo is unchanged. */
+	uint32_t const side = which % 2;
+	uint32_t const o    = (_n_out == _n_in) ? which : side;
+
+	if (which >= pos.size () || o >= obufs.count ().n_audio ()) {
+		return;
+	}
 
 	pan_t   delta;
 	Sample* dst;
@@ -163,9 +196,9 @@ Pannerbalance::distribute_one (AudioBuffer& srcbuf, BufferSet& obufs, gain_t gai
 
 	Sample* const src = srcbuf.data ();
 
-	dst = obufs.get_audio (which).data ();
+	dst = obufs.get_audio (o).data ();
 
-	if (fabsf ((delta = (pos[which] - desired_pos[which]))) > 0.002) { // about 1 degree of arc
+	if (fabsf ((delta = (pos[which] - desired_pos[side]))) > 0.002) { // about 1 degree of arc
 
 		/* we've moving the pan by an appreciable amount, so we must
 		 * interpolate over 64 samples or nframes, whichever is smaller */
@@ -188,7 +221,7 @@ Pannerbalance::distribute_one (AudioBuffer& srcbuf, BufferSet& obufs, gain_t gai
 		mix_buffers_with_gain (dst + n, src + n, nframes - n, pan);
 
 	} else {
-		pos[which]        = desired_pos[which];
+		pos[which]        = desired_pos[side];
 		pos_interp[which] = pos[which];
 
 		if ((pan = (pos[which] * gain_coeff)) != 1.0f) {
@@ -212,7 +245,13 @@ Pannerbalance::distribute_one_automated (AudioBuffer& srcbuf, BufferSet& obufs,
                                          samplepos_t start, samplepos_t end, pframes_t nframes,
                                          pan_t** buffers, uint32_t which)
 {
-	assert (obufs.count ().n_audio () == 2);
+	/* Spite: as in distribute_one (); the gains for a side go into buffers[side] */
+	uint32_t const side = which % 2;
+	uint32_t const o    = (_n_out == _n_in) ? which : side;
+
+	if (o >= obufs.count ().n_audio ()) {
+		return;
+	}
 
 	Sample*       dst;
 	pan_t*        pbuf;
@@ -230,23 +269,23 @@ Pannerbalance::distribute_one_automated (AudioBuffer& srcbuf, BufferSet& obufs,
 	for (pframes_t n = 0; n < nframes; ++n) {
 		float const pos = position[n];
 
-		if (which == 0) { // Left
+		if (side == 0) { // Left
 			if (pos > .5) {
-				buffers[which][n] = 2 - 2. * pos;
+				buffers[side][n] = 2 - 2. * pos;
 			} else {
-				buffers[which][n] = 1.0;
+				buffers[side][n] = 1.0;
 			}
 		} else { // Right
 			if (pos < .5) {
-				buffers[which][n] = 2. * pos;
+				buffers[side][n] = 2. * pos;
 			} else {
-				buffers[which][n] = 1.0;
+				buffers[side][n] = 1.0;
 			}
 		}
 	}
 
-	dst  = obufs.get_audio (which).data ();
-	pbuf = buffers[which];
+	dst  = obufs.get_audio (o).data ();
+	pbuf = buffers[side];
 
 	for (pframes_t n = 0; n < nframes; ++n) {
 		dst[n] += src[n] * pbuf[n];

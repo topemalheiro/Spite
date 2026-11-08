@@ -58,6 +58,14 @@ public:
 	PannerInfo* get_by_uri (std::string uri) const;
 	PannerUriMap get_available_panners(uint32_t const a_in, uint32_t const a_out) const;
 
+	/* Spite: the Stereo Balance panner also pans more than two channels, an even number, as stereo
+	 * pairs (odd channels left, even right), into as many outputs or into two. PgD4S's 16 stereo
+	 * buses are 32 channels. */
+	static bool stereo_pairs (uint32_t in, uint32_t out) {
+		return in > 2 && (in % 2) == 0 && (out == 2 || out == in);
+	}
+	static std::string balance_uri () { return "http://ardour.org/plugin/panner_balance"; }
+
 private:
 	PannerManager();
 	static PannerManager* _instance;

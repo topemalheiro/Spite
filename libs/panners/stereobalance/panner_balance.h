@@ -42,14 +42,16 @@ public:
 	Pannerbalance (std::shared_ptr<Pannable>);
 	~Pannerbalance ();
 
+	/* Spite: 2 in and 2 out, or more channels as stereo pairs, see PannerManager::stereo_pairs () */
 	ChanCount in () const
 	{
-		return ChanCount (DataType::AUDIO, 2);
+		return ChanCount (DataType::AUDIO, _n_in);
 	}
 	ChanCount out () const
 	{
-		return ChanCount (DataType::AUDIO, 2);
+		return ChanCount (DataType::AUDIO, _n_out);
 	}
+	void configure_io (ChanCount in, ChanCount out);
 
 	void                      set_position (double);
 	bool                      clamp_position (double&);
@@ -66,9 +68,13 @@ public:
 	void thaw ();
 
 protected:
-	float pos[2];
-	float desired_pos[2];
-	float pos_interp[2];
+	float              desired_pos[2]; /* left, right */
+	std::vector<float> pos;            /* per input, gliding to its side's desired_pos */
+	std::vector<float> pos_interp;
+	uint32_t           _n_in;
+	uint32_t           _n_out;
+
+	void reset_glide ();
 
 	void update ();
 

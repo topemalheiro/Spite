@@ -177,8 +177,9 @@ PannerManager::select_panner (ChanCount in, ChanCount out, std::string const uri
 	for (list<PannerInfo*>::iterator p = panner_info.begin(); p != panner_info.end(); ++p) {
 		PanPluginDescriptor const& d ((*p)->descriptor);
 		if (d.panner_uri != uri) continue;
-		if (d.in != nin && d.in != -1) continue;
-		if (d.out != nout && d.out != -1) continue;
+		bool const pairs = d.panner_uri == balance_uri () && stereo_pairs (nin, nout); /* Spite */
+		if (!pairs && d.in != nin && d.in != -1) continue;
+		if (!pairs && d.out != nout && d.out != -1) continue;
 		return *p;
 	}
 
@@ -279,6 +280,11 @@ PannerManager::get_available_panners(uint32_t const a_in, uint32_t const a_out) 
 	/* get available panners for current configuration. */
 	for (list<PannerInfo*>::const_iterator p = panner_info.begin(); p != panner_info.end(); ++p) {
 		PanPluginDescriptor const& d ((*p)->descriptor);
+		if (d.panner_uri == balance_uri () && stereo_pairs (in, out)) {
+			/* Spite: stereo pairs, see stereo_pairs () */
+			panner_list.insert(std::pair<std::string,std::string>(d.panner_uri,d.name));
+			continue;
+		}
 		if (d.in != -1 && d.in != in) continue;
 		if (d.out != -1 && d.out != out) continue;
 		if (d.in == -1 && d.out == -1 && out <= 2) continue;
