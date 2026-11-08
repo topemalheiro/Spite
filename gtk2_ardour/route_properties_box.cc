@@ -46,6 +46,10 @@
 #include "ardour/lv2_plugin.h"
 #include "ardour/plugin_insert.h"
 
+#ifdef GDK_WINDOWING_X11
+#include <ydk/gdkx.h>
+#endif
+
 #include "pbd/i18n.h"
 
 using namespace Gtk;
@@ -362,6 +366,9 @@ RoutePropertiesBox::RoutePropertiesBox ()
 	Gtk::Viewport* viewport = (Gtk::Viewport*) _scroller.get_child();
 	viewport->set_shadow_type(Gtk::SHADOW_NONE);
 	viewport->set_border_width(0);
+	/* Spite: Ctrl+wheel in the Device view, see devices_viewport_realized () */
+	viewport->signal_realize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_viewport_realized));
+	viewport->signal_unrealize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_viewport_unrealized), false);
 
 	_box.set_spacing (4);
 	_insert_frame.set_no_show_all ();
@@ -583,6 +590,73 @@ RoutePropertiesBox::set_available_height (int h)
 	if (_device_faces && !(_proc_uis.empty () && _faces.empty ())) {
 		_box.set_size_request (-1, title_height () + face_height () + 4);
 	}
+}
+
+#ifdef GDK_WINDOWING_X11
+/* Spite: in the Device view, Ctrl+wheel anywhere over the devices scrolls them
+ * sideways, down to the right and up to the left. A PgD4S face is an X window
+ * of its own that would take the wheel itself, so the row grabs Ctrl+wheel at
+ * the X level, and takes it before GDK passes it to the widget under the
+ * pointer (a knob would turn). */
+void
+RoutePropertiesBox::devices_viewport_realized ()
+{
+	Gtk::Viewport* viewport = dynamic_cast<Gtk::Viewport*> (_scroller.get_child ());
+	if (!_device_faces || !viewport || !viewport->get_bin_window ()) {
+		return;
+	}
+	GdkWindow*     win  = viewport->get_bin_window ()->gobj ();
+	::Display*     dpy  = GDK_WINDOW_XDISPLAY (win);
+	::Window       xwin = GDK_WINDOW_XID (win);
+	unsigned const mods[] = { ControlMask, ControlMask | LockMask, ControlMask | Mod2Mask, ControlMask | LockMask | Mod2Mask }; /* Caps and Num Lock on or off */
+
+	gdk_error_trap_push ();
+	for (unsigned int button = 4; button <= 7; ++button) { /* up, down, left, right */
+		for (auto const m : mods) {
+			XGrabButton (dpy, button, m, xwin, False, ButtonPressMask | ButtonReleaseMask, GrabModeAsync, GrabModeAsync, None, None);
+		}
+	}
+	gdk_flush ();
+	gdk_error_trap_pop ();
+
+	gdk_window_add_filter (win, devices_wheel_filter, this);
+}
+
+void
+RoutePropertiesBox::devices_viewport_unrealized ()
+{
+	/* the grabs go with the window */
+	Gtk::Viewport* viewport = dynamic_cast<Gtk::Viewport*> (_scroller.get_child ());
+	if (viewport && viewport->get_bin_window ()) {
+		gdk_window_remove_filter (viewport->get_bin_window ()->gobj (), devices_wheel_filter, this);
+	}
+}
+
+GdkFilterReturn
+RoutePropertiesBox::devices_wheel_filter (GdkXEvent* gxev, GdkEvent*, gpointer self)
+{
+	XEvent const* xev = (XEvent const*) gxev;
+	if ((xev->type != ButtonPress && xev->type != ButtonRelease) || xev->xbutton.button < 4 || xev->xbutton.button > 7 || !(xev->xbutton.state & ControlMask)) {
+		return GDK_FILTER_CONTINUE;
+	}
+	if (xev->type == ButtonPress) {
+		bool const back = (xev->xbutton.button == 4 || xev->xbutton.button == 6);
+		static_cast<RoutePropertiesBox*> (self)->scroll_devices (back ? -1 : 1);
+	}
+	return GDK_FILTER_REMOVE;
+}
+#else
+void RoutePropertiesBox::devices_viewport_realized () {}
+void RoutePropertiesBox::devices_viewport_unrealized () {}
+#endif
+
+void
+RoutePropertiesBox::scroll_devices (int dir)
+{
+	Gtk::Adjustment* adj  = _scroller.get_hadjustment ();
+	double const     page = adj->get_page_size ();
+	double const     step = pow (page, 2.0 / 3.0); /* the step GTK's own wheel scrolling takes */
+	adj->set_value (std::max (adj->get_lower (), std::min (adj->get_upper () - page, adj->get_value () + dir * step)));
 }
 
 void

@@ -99,6 +99,12 @@ private:
 	int title_height () const;
 	int face_overhead () const;
 
+	/* Ctrl+wheel over the devices scrolls them sideways */
+	void devices_viewport_realized ();
+	void devices_viewport_unrealized ();
+	static GdkFilterReturn devices_wheel_filter (GdkXEvent*, GdkEvent*, gpointer);
+	void scroll_devices (int dir);
+
 	int _idle_refill_processors_id;
 
 	PBD::ScopedConnectionList _processor_connections;
