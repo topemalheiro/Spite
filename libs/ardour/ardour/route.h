@@ -750,6 +750,7 @@ private:
 
 	std::list<std::pair<ChanCount, ChanCount> > try_configure_processors (ChanCount, ProcessorStreams *);
 	std::list<std::pair<ChanCount, ChanCount> > try_configure_processors_unlocked (ChanCount, ProcessorStreams *);
+	bool limit_plugin_outputs_unlocked (std::shared_ptr<PluginInsert>); /* Spite */
 
 	bool add_processor_from_xml_2X (const XMLNode&, int);
 

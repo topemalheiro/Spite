@@ -254,6 +254,9 @@ CONFIG_VARIABLE (bool, conceal_vst2_if_vst3_exists, "conceal-vst2-if-vst3-exists
 CONFIG_VARIABLE (bool, show_vst3_micro_edit_inline, "show-vst3-micro-edit-inline", false)
 CONFIG_VARIABLE (bool, ask_replace_instrument, "ask-replace-instrument", true)
 CONFIG_VARIABLE (bool, ask_setup_instrument, "ask-setup-instrument", true)
+/* Spite: a plugin with more outputs than the track's stereo pair (PgD4S has 16 stereo buses) gets only
+ * its main pair, so the track keeps a stereo panner. False: all of its outputs, as in Ardour. */
+CONFIG_VARIABLE (bool, plugin_main_outputs_only, "plugin-main-outputs-only", true)
 CONFIG_VARIABLE (bool, setup_sidechain, "setup-sidechain", false)
 CONFIG_VARIABLE (uint32_t, plugin_scan_timeout, "plugin-scan-timeout", 150) /* deci-seconds */
 CONFIG_VARIABLE (uint32_t, limit_n_automatables, "limit-n-automatables", 512)

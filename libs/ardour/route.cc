@@ -1210,7 +1210,14 @@ Route::add_processors (const ProcessorList& others, std::shared_ptr<Processor> b
 			other->set_owner (this);
 
 			{
-				if (configure_processors_unlocked (err, &lm)) {
+				/* Spite: a plugin with extra outputs keeps its main pair (plugin-main-outputs-only) */
+				bool const limited = pi && limit_plugin_outputs_unlocked (pi);
+				int rv = configure_processors_unlocked (err, &lm);
+				if (rv && limited) {
+					pi->set_preset_out (ChanCount ());
+					rv = configure_processors_unlocked (err, &lm);
+				}
+				if (rv) {
 					pstate.restore ();
 					configure_processors_unlocked (0, &lm); // it worked before we tried to add it ...
 					return -1;
@@ -1672,7 +1679,15 @@ Route::replace_processor (std::shared_ptr<Processor> old, std::shared_ptr<Proces
 			}
 		}
 
-		if (configure_processors_unlocked (err, &lm)) {
+		/* Spite: a plugin with extra outputs keeps its main pair (plugin-main-outputs-only) */
+		std::shared_ptr<PluginInsert> spi = std::dynamic_pointer_cast<PluginInsert> (sub);
+		bool const limited = spi && limit_plugin_outputs_unlocked (spi);
+		int rv = configure_processors_unlocked (err, &lm);
+		if (rv && limited) {
+			spi->set_preset_out (ChanCount ());
+			rv = configure_processors_unlocked (err, &lm);
+		}
+		if (rv) {
 			pstate.restore ();
 			configure_processors_unlocked (0, &lm);
 			return -1;
@@ -2503,6 +2518,29 @@ Route::reset_plugin_insert (std::shared_ptr<Processor> proc)
 {
 	ChanCount unused;
 	return customize_plugin_insert (proc, 0, unused, unused);
+}
+
+/* Spite: plugin-main-outputs-only. Called with a plugin just put in _processors, before it's
+ * configured: once configured with all its outputs, the track's output ports would follow and
+ * stay. Caller holds the process lock and the processor lock. */
+bool
+Route::limit_plugin_outputs_unlocked (std::shared_ptr<PluginInsert> pi)
+{
+	if (is_auditioner () || !Config->get_plugin_main_outputs_only ()) {
+		return false;
+	}
+	list<pair<ChanCount, ChanCount> > c = try_configure_processors_unlocked (input_streams (), 0);
+	list<pair<ChanCount, ChanCount> >::const_iterator ci = c.begin ();
+	for (auto const& p : _processors) {
+		if (ci == c.end ()) {
+			break;
+		}
+		if (p == pi) {
+			return pi->limit_to_main_outputs (ci->first, ci->second);
+		}
+		++ci;
+	}
+	return false;
 }
 
 bool

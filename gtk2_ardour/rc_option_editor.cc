@@ -4603,6 +4603,25 @@ These settings will only take effect after %1 is restarted.\n\
 	Gtkmm2ext::UI::instance()->set_tip (bo->tip_widget(),
 			_("<b>When enabled</b> show a dialog to select instrument channel configuration before adding a multichannel plugin."));
 
+	/* Spite */
+	add_option (_("Plugins"), new OptionEditorHeading (_("Outputs")));
+
+	ComboOption<bool>* pmo = new ComboOption<bool> (
+			"plugin-main-outputs-only",
+			_("Plugins with more than two outputs"),
+			sigc::mem_fun (*_rc_config, &RCConfiguration::get_plugin_main_outputs_only),
+			sigc::mem_fun (*_rc_config, &RCConfiguration::set_plugin_main_outputs_only)
+			);
+	pmo->add (true, _("Use only the main stereo pair"));
+	pmo->add (false, _("Use all outputs"));
+	add_option (_("Plugins"), pmo);
+	Gtkmm2ext::UI::instance()->set_tip (pmo->tip_widget(),
+			_("Some plugins have more outputs than a stereo pair: PgD4S has 16 stereo buses, 32 outputs.\n"
+			  "<b>Use only the main stereo pair</b>: such a plugin is added with its first two outputs, and the track keeps its normal stereo panner. "
+			  "Sessions saved before this option come up the same way, unless a plugin has a custom pin setup.\n"
+			  "<b>Use all outputs</b>: the plugin sends all of them to the track, which then pans them with a multichannel panner.\n"
+			  "Either way, a plugin's outputs can be changed in its Pin Connections window."));
+
 	add_option (_("Plugins"), new OptionEditorHeading (_("Statistics")));
 
 	add_option (_("Plugins"),

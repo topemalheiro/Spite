@@ -44,6 +44,7 @@
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/port.h"
+#include "ardour/rc_configuration.h"
 #include "ardour/session.h"
 #include "ardour/types.h"
 
@@ -220,6 +221,21 @@ PluginInsert::set_preset_out (const ChanCount& c)
 		PluginConfigChanged (); /* EMIT SIGNAL */
 	}
 	return changed;
+}
+
+bool
+PluginInsert::limit_to_main_outputs (ChanCount const& in, ChanCount const& out)
+{
+	if (!Config->get_plugin_main_outputs_only () || _custom_cfg || _preset_out.n_audio () > 0) {
+		/* a pin setup or an output preset chosen: so be it */
+		return false;
+	}
+	uint32_t const n_main = std::max<uint32_t> (2, in.n_audio ());
+	if (out.n_audio () <= n_main) {
+		return false;
+	}
+	DEBUG_TRACE (DEBUG::ChanMapping, string_compose ("%1: main outputs only, %2 of %3\n", name (), n_main, out.n_audio ()));
+	return set_preset_out (ChanCount (DataType::AUDIO, n_main));
 }
 
 bool
@@ -2670,6 +2686,8 @@ PluginInsert::state () const
 
 	/* save custom i/o config */
 	node.set_property("custom", _custom_cfg);
+	/* Spite: this state knows the plugin-main-outputs-only preference, see set_state () */
+	node.set_property (X_("main-outputs-pref"), true);
 	for (uint32_t pc = 0; pc < get_count(); ++pc) {
 		char tmp[128];
 		snprintf (tmp, sizeof(tmp), "InputMap-%d", pc);
@@ -2888,6 +2906,19 @@ PluginInsert::set_state(const XMLNode& node, int version)
 			/* do not add VST busses which were not previously available */
 			_custom_cfg = true;
 		}
+	}
+
+	/* Spite: older states (Ardour, Spite before the plugin-main-outputs-only preference) gave an
+	 * instrument with many outputs, such as PgD4S's 32, all of them by default: the Plugin Setup
+	 * dialog set the output preset to all outputs. That isn't a choice, so with the preference such
+	 * a plugin comes up with its main stereo pair; configure_io () makes the maps for it. A pin
+	 * setup (custom) or a smaller preset is kept, and so is everything in states saved since. */
+	bool pref_known = false;
+	node.get_property (X_("main-outputs-pref"), pref_known);
+	if (!pref_known && !_custom_cfg && Config->get_plugin_main_outputs_only ()
+	    && _preset_out.n_audio () > 2 && _preset_out.n_audio () >= natural_output_streams ().n_audio ()) {
+		DEBUG_TRACE (DEBUG::ChanMapping, string_compose ("%1: main outputs only, output preset %2 -> 2\n", name (), _preset_out.n_audio ()));
+		_preset_out = ChanCount (DataType::AUDIO, 2);
 	}
 
 	if (in_maps == out_maps && out_maps >0 && out_maps == get_count()) {

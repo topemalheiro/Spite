@@ -21,6 +21,8 @@
 #include <ytkmm/stock.h>
 #include <ytkmm/table.h>
 
+#include "ardour/rc_configuration.h"
+
 #include "plugin_setup_dialog.h"
 #include "pbd/i18n.h"
 
@@ -97,8 +99,13 @@ PluginSetupDialog::PluginSetupDialog (std::shared_ptr<ARDOUR::Route> r, std::sha
 		_fan_out.signal_clicked.connect (sigc::mem_fun (*this, &PluginSetupDialog::toggle_fan_out));
 		_fan_out.set_active (true);
 	} else {
-		_pi->set_preset_out (_pi->natural_output_streams ());
-		update_sensitivity (_pi->natural_output_streams ().n_audio ());
+		ChanCount out (_pi->natural_output_streams ());
+		if (Config->get_plugin_main_outputs_only () && out.n_audio () > 2) {
+			/* Spite: only the main stereo pair, not e.g. PgD4S's 16 pairs */
+			out = ChanCount (DataType::AUDIO, 2);
+		}
+		_pi->set_preset_out (out);
+		update_sensitivity (out.n_audio ());
 		_fan_out.set_active (false);
 	}
 
@@ -135,6 +142,13 @@ PluginSetupDialog::setup_output_presets ()
 		}
 	}
 
+	/* Spite: plugin-main-outputs-only offers Stereo, and picks it, for a plugin with more outputs.
+	 * A plugin with fixed ports (PgD4S) then uses its first two. */
+	const bool main_only = Config->get_plugin_main_outputs_only () && !ppc.empty () && *ppc.rbegin () > 2;
+	if (main_only) {
+		ppc.insert (2);
+	}
+
 	const uint32_t n_audio = _cur_outputs.n_audio ();
 
 	bool have_matching_io = ppc.find (n_audio) != ppc.end ();
@@ -160,7 +174,9 @@ PluginSetupDialog::setup_output_presets ()
 		}
 	}
 
-	if (have_matching_io) {
+	if (main_only) {
+		select_output_preset (2);
+	} else if (have_matching_io) {
 		select_output_preset (_cur_outputs.n_audio ());
 	} else if (ppc.size() == 1 && _pi->strict_io ()) {
 		select_output_preset (*ppc.begin ());

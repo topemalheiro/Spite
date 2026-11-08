@@ -499,7 +499,8 @@ PluginPinWidget::refill_output_presets ()
 	using namespace Menu_Helpers;
 	_out_presets.clear_items ();
 
-	bool need_dropdown = _pi->has_output_presets ();
+	/* Spite: also when an output preset is set, e.g. Stereo for PgD4S (plugin-main-outputs-only) */
+	bool need_dropdown = _pi->has_output_presets () || _pi->preset_out ().n_audio () > 0;
 
 	if (!need_dropdown) {
 		_out_presets.set_sensitive (false);
@@ -507,6 +508,7 @@ PluginPinWidget::refill_output_presets ()
 		return;
 	}
 
+	_out_presets.set_sensitive (true);
 	_out_presets.add_menu_elem (MenuElem (_("Automatic"), sigc::bind (sigc::mem_fun (*this, &PluginPinWidget::select_output_preset), 0)));
 
 	const uint32_t n_audio = _pi->preset_out ().n_audio ();
@@ -527,6 +529,15 @@ PluginPinWidget::refill_output_presets ()
 		ppc.insert (16);
 		ppc.insert (24);
 		ppc.insert (32);
+	}
+
+	/* Spite: a plugin with more outputs can use only its main stereo pair (a plugin with fixed
+	 * ports, such as PgD4S, uses its first two), and the preset in use is always listed */
+	if (!ppc.empty () && *ppc.rbegin () > 2) {
+		ppc.insert (2);
+	}
+	if (n_audio != 0) {
+		ppc.insert (n_audio);
 	}
 
 	for (PluginOutputConfiguration::const_iterator i = ppc.begin () ; i != ppc.end (); ++i) {
