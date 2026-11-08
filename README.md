@@ -45,6 +45,8 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 - **Preset morphing.** Mappings and setups saved as presets and morphed between, on XY pads or pads with more corners.
 - **Ready-to-play sets.** Cue page sets with the clips, devices, views and colours already laid out, for different kinds of music.
 
+<img width="871" height="327" alt="image" src="https://github.com/user-attachments/assets/9426b204-b89a-4edb-8d80-2b9f8976eefd" />
+
 ## Build and run
 
 Spite is written in C++17 on Ardour's code base, with Ardour's own copy of the GTK2 toolkit (in `libs/tk`), the waf build system and Lua scripting. plugdata, in the `plugdata` folder, is a separate C++ project built with CMake, on JUCE and Pure Data. Spite builds the way Ardour does, so Ardour's guides at <https://ardour.org/development.html> apply too.
