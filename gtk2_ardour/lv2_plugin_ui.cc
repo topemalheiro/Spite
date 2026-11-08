@@ -393,8 +393,11 @@ LV2PluginUI::lv2ui_instantiate(const std::string& title)
 
 	if (_embedded) {
 		/* the face's own options: a 60 Hz idle rate, so animated faces stay smooth (suil
-		 * reads ui:updateRate). The zoom is PgD4S's own (spite_lv2_ui_face_height): JUCE's
-		 * OpenGL view doesn't follow a fractional ui:scaleFactor for one window. */
+		 * reads ui:updateRate), and a ui:scaleFactor of 1. The zoom is PgD4S's own: it fills
+		 * spite_lv2_ui_face_height (), which is in X pixels and already has the UI scale in
+		 * it. Spite's UI scale as well would zoom the face twice (JUCE scales the window by
+		 * ui:scaleFactor), drawing it bigger than its place. */
+		static float const face_ui_scale = 1.f;
 		for (size_t i = 0; i < fi; ++i) {
 			if (!features[i] || strcmp (features[i]->URI, LV2_OPTIONS__options)) {
 				continue;
@@ -408,9 +411,11 @@ LV2PluginUI::lv2ui_instantiate(const std::string& title)
 			uint32_t const scale_key = uri_map.uri_to_id (LV2_UI__scaleFactor);
 			free (_face_options);
 			_face_options = (LV2_Options_Option*) calloc (n + 2, sizeof (LV2_Options_Option));
-			(void) scale_key;
 			for (size_t k = 0; k < n; ++k) {
 				_face_options[k] = src[k];
+				if (src[k].key == scale_key) {
+					_face_options[k].value = &face_ui_scale;
+				}
 			}
 			_face_options[n].context = LV2_OPTIONS_INSTANCE;
 			_face_options[n].key     = uri_map.uri_to_id (LV2_UI__updateRate);
