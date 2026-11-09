@@ -2536,7 +2536,9 @@ Route::limit_plugin_outputs_unlocked (std::shared_ptr<PluginInsert> pi)
 			break;
 		}
 		if (p == pi) {
-			return pi->limit_to_main_outputs (ci->first, ci->second);
+			std::shared_ptr<Route> master = _session.master_out ();
+			bool const stereo_mix = !master || master->n_inputs ().n_audio () <= 2;
+			return pi->limit_to_main_outputs (ci->first, ci->second, stereo_mix);
 		}
 		++ci;
 	}

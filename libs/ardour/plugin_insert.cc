@@ -224,13 +224,15 @@ PluginInsert::set_preset_out (const ChanCount& c)
 }
 
 bool
-PluginInsert::limit_to_main_outputs (ChanCount const& in, ChanCount const& out)
+PluginInsert::limit_to_main_outputs (ChanCount const& in, ChanCount const& out, bool stereo_mix)
 {
 	if (!Config->get_plugin_main_outputs_only () || _custom_cfg || _preset_out.n_audio () > 0) {
 		/* a pin setup or an output preset chosen: so be it */
 		return false;
 	}
-	uint32_t const n_main = std::max<uint32_t> (2, in.n_audio ());
+	/* in a stereo session, the main pair even when more channels come in (PgD4S-fx after a PgD4S
+	 * set to 32 Channels); with a surround master, as many as come in */
+	uint32_t const n_main = stereo_mix ? 2 : std::max<uint32_t> (2, in.n_audio ());
 	if (out.n_audio () <= n_main) {
 		return false;
 	}

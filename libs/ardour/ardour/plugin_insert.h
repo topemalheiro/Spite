@@ -173,9 +173,10 @@ public:
 	void set_custom_cfg (bool b);
 	bool set_preset_out (const ChanCount&);
 	/* Spite: with the plugin-main-outputs-only preference, a plugin whose automatic configuration
-	 * (in, out) gives it more audio outputs than max (2, its audio inputs) gets an output preset of
-	 * that many, its main pair. True if the preset changed. */
-	bool limit_to_main_outputs (ChanCount const& in, ChanCount const& out);
+	 * (in, out) gives it more audio outputs than its main pair gets an output preset of 2 in a
+	 * stereo session (stereo_mix), or of max (2, its audio inputs) with a surround master. True if
+	 * the preset changed. */
+	bool limit_to_main_outputs (ChanCount const& in, ChanCount const& out, bool stereo_mix);
 	bool add_sidechain  (uint32_t n_audio = 1, uint32_t n_midi = 0);
 	bool del_sidechain ();
 	void update_sidechain_name ();

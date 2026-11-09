@@ -499,8 +499,10 @@ PluginPinWidget::refill_output_presets ()
 	using namespace Menu_Helpers;
 	_out_presets.clear_items ();
 
-	/* Spite: also when an output preset is set, e.g. Stereo for PgD4S (plugin-main-outputs-only) */
-	bool need_dropdown = _pi->has_output_presets () || _pi->preset_out ().n_audio () > 0;
+	/* Spite: also when an output preset is set, e.g. Stereo for PgD4S (plugin-main-outputs-only),
+	 * and for any plugin with more than two outputs, effects too (PgD4S-fx): Ardour offers
+	 * output presets to instruments only */
+	bool need_dropdown = _pi->has_output_presets () || _pi->preset_out ().n_audio () > 0 || _pi->natural_output_streams ().n_audio () > 2;
 
 	if (!need_dropdown) {
 		_out_presets.set_sensitive (false);
