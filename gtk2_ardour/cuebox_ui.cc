@@ -288,7 +288,7 @@ CueBoxUI::context_menu (GdkEventButton* ev, uint64_t idx)
 		/* Spite: one per scene, grouped when there are many */
 		ARDOUR_UI_UTILS::add_scene_menu_items (jitems, n_scenes (), [this, idx] (uint32_t i) {
 			FollowAction jump_fa (FollowAction::JumpTrigger);
-			jump_fa.targets.set (i);
+			jump_fa.targets = FollowTargets::single (i);
 			set_all_follow_action (jump_fa, idx);
 		});
 	fitems.push_back (MenuElem (_("Jump..."), *jump_menu));

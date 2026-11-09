@@ -158,6 +158,8 @@ ARDOUR::cue_marker_name (int32_t index)
 }
 
 FollowAction::FollowAction (std::string const & str)
+	: type (None)
+	, targets (nullptr)
 {
 	std::string::size_type colon = str.find_first_of (':');
 
@@ -170,18 +172,13 @@ FollowAction::FollowAction (std::string const & str)
 	std::string const t (str.substr (colon + 1));
 
 	if (!t.empty () && t[0] == '@') {
-		/* Spite: the scenes, by index, when one is beyond the first 64 */
-		std::stringstream ss (t.substr (1));
-		std::string tok;
-		while (std::getline (ss, tok, ',')) {
-			char* end = 0;
-			unsigned long const n = strtoul (tok.c_str (), &end, 10);
-			if (end == tok.c_str ()) {
-				throw failed_constructor ();
-			}
-			if (n < targets.size ()) {
-				targets.set (n);
-			}
+		/* Spite: the scenes, as a list with runs ("@3,10-40,512"), when one
+		 * is beyond the first 64
+		 */
+		bool ok;
+		targets = FollowTargets::parse (t.substr (1), &ok);
+		if (!ok) {
+			throw failed_constructor ();
 		}
 		return;
 	}
@@ -195,27 +192,19 @@ FollowAction::FollowAction (std::string const & str)
 	if (!ss) {
 		throw failed_constructor();
 	}
-	targets = Targets (ul);
+	targets = FollowTargets::from_mask (ul);
 }
 
 std::string
 FollowAction::to_string () const
 {
-	/* We use the ulong representation of the bitset because the string
-	   version is absurd. Spite: a bitset beyond the first 64 scenes doesn't
-	   fit, so then the scenes are listed by index ("@3,70,512").
-	*/
-	if ((targets >> 64).none ()) {
-		return string_compose ("%1:%2", enum_2_string (type), targets.to_ullong ());
+	/* the old form, a 64-bit number, while every target is within the
+	 * first 64 scenes (older builds read that); beyond, a list with runs
+	 */
+	if (!targets || targets->fits_mask ()) {
+		return string_compose ("%1:%2", enum_2_string (type), targets ? targets->mask () : 0);
 	}
-
-	std::string list;
-	for (size_t n = 0; n < targets.size (); ++n) {
-		if (targets.test (n)) {
-			list += string_compose ("%1%2", list.empty () ? "" : ",", n);
-		}
-	}
-	return string_compose ("%1:@%2", enum_2_string (type), list);
+	return string_compose ("%1:@%2", enum_2_string (type), FollowTargets::to_string (targets));
 }
 
 
@@ -730,30 +719,13 @@ Trigger::get_state () const
 void
 Trigger::shift_follow_targets (uint32_t at, int delta)
 {
-	/* Spite: see TriggerBox::insert_slot () and remove_slot (). Called with
-	 * the process lock held, so the property can be set directly as well as
-	 * the UI state: it is what gets saved.
+	/* Spite: see TriggerBox::commit_shift (). Called with the process lock
+	 * held, so the property can be set directly as well as the UI state:
+	 * it is what gets saved.
 	 */
 	for (int which = 0; which < 2; ++which) {
 		FollowAction fa (which == 0 ? follow_action0 () : follow_action1 ());
-		if (fa.targets.none ()) {
-			continue;
-		}
-		/* word-wise: the slots below `at` stay; the ones from `at` move up
-		 * one (insert), or the ones above `at` move down one (remove, which
-		 * drops the removed slot itself). Shifting a bitset by its size or
-		 * more gives no bits.
-		 */
-		typedef FollowAction::Targets T;
-		size_t const n = T ().size ();
-		T const below = (at == 0) ? T () : (~T () >> (n - std::min<size_t> (at, n)));
-		T moved (fa.targets & below);
-		if (delta > 0) {
-			moved |= (fa.targets & ~below) << 1;
-		} else {
-			T const above = (at + 1 >= n) ? T () : (~T () << (at + 1));
-			moved |= (fa.targets & above) >> 1;
-		}
+		FollowTargets const* moved = FollowTargets::shifted (fa.targets, at, delta);
 		if (moved == fa.targets) {
 			continue;
 		}
@@ -6310,7 +6282,7 @@ TriggerBox::determine_next_trigger (SlotMap const& m, uint32_t current)
 		int32_t  pick = -1;
 		uint32_t seen = 0;
 		for_stored_in (m, [&] (uint32_t n, TriggerPtr const& t) {
-			if (n < fa.targets.size () && fa.targets.test (n) && t->playable()) {
+			if (fa.has_target (n) && t->playable()) {
 				if (_pcg.rand (++seen) == 0) {
 					pick = n;
 				}

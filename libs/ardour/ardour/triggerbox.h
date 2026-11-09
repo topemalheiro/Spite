@@ -901,13 +901,13 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 
 	/* Spite: the number of slots is the session's scene count
 	 * (Session::scene_count()), which every trigger box follows. A new
-	 * session starts with default_triggers_per_box. max_triggers_per_box is
-	 * the limit: follow actions name their target slots in a bitset of that
-	 * size (FollowAction::Targets), and every slot is a whole Trigger (about
-	 * 6 kB), on every track.
+	 * session starts with default_triggers_per_box. Empty slots store
+	 * nothing (SlotEntry) and follow-action targets are runs of scenes
+	 * (FollowTargets), so nothing depends on max_triggers_per_box any more
+	 * but the clamps that still use it (plan step 8 removes it).
 	 */
 	static const int32_t default_triggers_per_box = 8;
-	static const int32_t max_triggers_per_box = FollowAction::max_targets;
+	static const int32_t max_triggers_per_box = 1024; /* Spite: until the cap goes (plan step 8) */
 
 	TriggerBox (Session&, DataType dt);
 	~TriggerBox ();

@@ -972,15 +972,8 @@ FollowActionIcon::render (ArdourCanvas::Rect const & area, Cairo::RefPtr<Cairo::
 		context->fill ();
 		break;
 	case FollowAction::JumpTrigger:
-		if (trigger->follow_action0().targets.count() == 1 ) {  //Jump to a specific row; just draw the letter of the row we are jumping to
-			int cue_idx = -1;
-			for (int i = 0; i < (int) trigger->follow_action0().targets.size (); i++) {
-				if (trigger->follow_action0().targets.test(i)) {
-					cue_idx = i;
-					break;
-				}
-			}
-			assert (cue_idx >= 0);
+		if (trigger->follow_action0().n_targets() == 1 ) {  //Jump to a specific row; just draw the letter of the row we are jumping to
+			int const cue_idx = trigger->follow_action0().targets->first (); /* Spite: target runs */
 			Glib::RefPtr<Pango::Layout> layout = Pango::Layout::create (context);
 			layout->set_font_description (font_description);
 			layout->set_text (cue_marker_name (cue_idx));

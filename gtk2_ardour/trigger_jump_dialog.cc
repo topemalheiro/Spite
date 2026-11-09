@@ -131,7 +131,7 @@ TriggerJumpDialog::button_clicked (int b)
 	FollowAction jump_fa = _right_fa ? t->follow_action1() : t->follow_action0();
 
 	jump_fa.type = FollowAction::JumpTrigger;  //should already be the case if we are in this dialog, but let's take no chances
-	jump_fa.targets.flip(b);
+	jump_fa.targets = FollowTargets::toggled (jump_fa.targets, b);
 
 	if (_right_fa) {
 		t->set_follow_action1(jump_fa);
@@ -170,7 +170,7 @@ TriggerJumpDialog::on_trigger_changed (PropertyChange const& what)
 
 		TriggerPtr const ti (box.trigger (i)); /* Spite: none for an empty slot */
 		(*b)->set_text (ti ? ti->name () : std::string ());
-		(*b)->set_active_state(jump_fa.targets.test(i) ? Gtkmm2ext::ExplicitActive : Gtkmm2ext::Off);
+		(*b)->set_active_state(jump_fa.has_target (i) ? Gtkmm2ext::ExplicitActive : Gtkmm2ext::Off);
 
 		++b;
 	}
@@ -180,22 +180,20 @@ TriggerJumpDialog::on_trigger_changed (PropertyChange const& what)
 std::string
 TriggerJumpDialog::targets_to_runs (FollowAction const& fa, uint32_t n_scenes)
 {
-	std::string    out;
-	uint32_t const m = std::min<uint32_t> (n_scenes, fa.targets.size ());
-	for (uint32_t i = 0; i < m;) {
-		if (!fa.targets.test (i)) {
-			++i;
-			continue;
+	/* Spite: the targets are runs already (FollowTargets); scenes from 1 here */
+	std::string out;
+	if (!fa.targets) {
+		return out;
+	}
+	for (auto const& r : fa.targets->runs ()) {
+		if (r.lo >= n_scenes) {
+			break;
 		}
-		uint32_t j = i;
-		while (j + 1 < m && fa.targets.test (j + 1)) {
-			++j;
-		}
+		uint32_t const j = std::min<uint32_t> (r.hi, n_scenes - 1);
 		if (!out.empty ()) {
 			out += ", ";
 		}
-		out += (i == j) ? std::to_string (i + 1) : string_compose ("%1-%2", i + 1, j + 1);
-		i = j + 1;
+		out += (r.lo == j) ? std::to_string (r.lo + 1) : string_compose ("%1-%2", r.lo + 1, j + 1);
 	}
 	return out;
 }
@@ -203,7 +201,7 @@ TriggerJumpDialog::targets_to_runs (FollowAction const& fa, uint32_t n_scenes)
 bool
 TriggerJumpDialog::runs_to_targets (std::string const& text, uint32_t n_scenes, FollowAction& fa)
 {
-	FollowAction::Targets t;
+	FollowTargets::Runs   t;
 	std::string           tok;
 	std::string           rest (text + ",");
 	for (char c : rest) {
@@ -220,15 +218,13 @@ TriggerJumpDialog::runs_to_targets (std::string const& text, uint32_t n_scenes, 
 		if (end && *end == '-') {
 			b = strtoul (end + 1, &end, 10);
 		}
-		if (!end || *end != '\0' || a < 1 || b < a || b > n_scenes || b > t.size ()) {
+		if (!end || *end != '\0' || a < 1 || b < a || b > n_scenes) {
 			return false;
 		}
-		for (unsigned long i = a; i <= b; ++i) {
-			t.set (i - 1);
-		}
+		t.push_back (FollowTargets::Run { (uint32_t) (a - 1), (uint32_t) (b - 1) });
 		tok.clear ();
 	}
-	fa.targets = t;
+	fa.targets = FollowTargets::intern (t);
 	return true;
 }
 

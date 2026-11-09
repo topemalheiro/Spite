@@ -64,6 +64,7 @@
 #include "pbd/microseconds.h"
 
 #include "ardour/chan_count.h"
+#include "ardour/follow_targets.h"
 #include "ardour/plugin_types.h"
 
 #include <map>
@@ -958,28 +959,21 @@ struct FollowAction {
 		JumpTrigger,
 	};
 
-	/* Spite: one bit per scene a jump can go to. This sets the most scenes
-	 * a session can have (TriggerBox::max_triggers_per_box). to_string ()
-	 * keeps the old format, a 64-bit number, while only the first 64 scenes
-	 * are named, so older builds still read those sessions.
+	/* Spite: the scenes a jump can go to, as interned runs (see
+	 * FollowTargets; nullptr: none), so their number is unlimited and a
+	 * FollowAction stays small and trivially copyable. to_string () keeps
+	 * the old format, a 64-bit number, while only the first 64 scenes are
+	 * named, so older builds still read those sessions.
 	 */
-	static const size_t max_targets = 1024;
-	typedef std::bitset<max_targets> Targets;
-
 	Type type;
-	Targets targets;
+	FollowTargets const* targets;
 
-	FollowAction () : type (None) {}
-	FollowAction (Type t, Targets const & tgts = Targets()) : type (t), targets (tgts) {}
-	FollowAction (Type t, std::string const & bitstring) : type (t), targets (bitstring) {}
+	FollowAction () : type (None), targets (nullptr) {}
+	FollowAction (Type t, FollowTargets const* tgts = nullptr) : type (t), targets (tgts) {}
 	FollowAction (std::string const &);
 
-	static Targets target_any () { Targets t; t.set(); return t; }
-	static Targets target_other (uint32_t skip) { Targets t; t.set (); t.reset (skip); return t; }
-	static Targets target_next_wrap (uint32_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } else { t.set (0); } return t; }
-	static Targets target_prev_wrap (uint32_t from) { Targets t; if (from) { t.set (from - 1); } else { t.set (t.size() - 1); } return t; }
-	static Targets target_next_nowrap (uint32_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } return t; }
-	static Targets target_prev_nowrap (uint32_t from) { Targets t; if (from) { t.set (from - 1); } return t; }
+	bool has_target (uint32_t scene) const { return FollowTargets::contains (targets, scene); }
+	size_t n_targets () const { return FollowTargets::count (targets); }
 
 	bool operator!= (FollowAction const & other) const {
 		return other.type != type || other.targets != targets;

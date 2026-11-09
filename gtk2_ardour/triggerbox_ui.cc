@@ -292,14 +292,8 @@ TriggerEntry::draw_follow_icon (Cairo::RefPtr<Cairo::Context> context, FollowAct
 			context->fill ();
 			break;
 		case FollowAction::JumpTrigger: {
-			if ( icon.targets.count() == 1 ) {  //Jump to a specific row; just draw the letter of the row we are jumping to
-				int cue_idx = -1;
-				for (int i = 0; i < (int) icon.targets.size (); i++) {
-					if (icon.targets.test(i)) {
-						cue_idx = i;
-						break;
-					}
-				}
+			if (icon.n_targets () == 1) {  //Jump to a specific row; just draw the letter of the row we are jumping to
+				int const cue_idx = icon.targets->first (); /* Spite: target runs */
 				Glib::RefPtr<Pango::Layout> layout = Pango::Layout::create (context);
 				layout->set_font_description (UIConfiguration::instance ().get_SmallMonospaceFont ());
 				layout->set_text (cue_marker_name (cue_idx));
