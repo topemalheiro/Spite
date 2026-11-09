@@ -132,7 +132,7 @@ TriggerEntry::connect_to_trigger ()
 {
 	TriggerUI::connect_to_trigger ();
 
-	TriggerPtr t (trigger ());
+	TriggerPtr t (trigger_if_any ());
 	if (t) {
 		t->ArmChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerEntry::rec_enable_change, this), gui_context ());
 	}
@@ -160,7 +160,7 @@ TriggerEntry::rec_enable_change ()
 	case Recording:
 		break;
 	case Enabled:
-		if (!UIConfiguration::instance().get_no_strobe() && trigger()->armed()) {
+		if (!UIConfiguration::instance().get_no_strobe() && view () && view ()->armed()) {
 			rec_blink_connection = Timers::blink_connect (sigc::mem_fun (*this, &TriggerEntry::blink_rec_enable));
 		}
 		break;
@@ -238,7 +238,7 @@ TriggerEntry::draw_follow_icon (Cairo::RefPtr<Cairo::Context> context, FollowAct
 	uint32_t fg_color = UIConfiguration::instance ().color ("neutral:midground");
 
 	/* in the case where there is a random follow-action, just put a "?" */
-	if (trigger ()->follow_action_probability () > 0) {
+	if (view ()->follow_action_probability () > 0) {
 		Glib::RefPtr<Pango::Layout> layout = Pango::Layout::create (context);
 		layout->set_font_description (UIConfiguration::instance ().get_SmallMonospaceFont ());
 		layout->set_text ("?");
@@ -323,16 +323,22 @@ TriggerEntry::draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float sz,
 	float margin = 4 * scale;
 	float size   = sz - 2 * margin;
 
-	bool active = trigger ()->active ();
+	/* Spite: an empty slot shows the box's defaults (view ()) */
+	std::shared_ptr<Trigger const> const v (view ());
+	if (!v) {
+		return;
+	}
 
-	if (!trigger ()->playable ()) {
+	bool active = v->active ();
+
+	if (!v->playable ()) {
 
 		bool solid = false;
 
 		switch (tref.box()->record_enabled()) {
 		case Enabled:
 			context->arc (margin + (size * 0.5), margin + (size * 0.5), (size * 0.5), 0., 360.0 * (M_PI/180.0));
-			if (trigger()->armed()) {
+			if (v->armed()) {
 				solid = rec_blink_on;
 			} else {
 				solid = false;
@@ -341,7 +347,7 @@ TriggerEntry::draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float sz,
 
 		case Recording:
 			context->arc (margin + (size * 0.5), margin + (size * 0.5), (size * 0.5), 0., 360.0 * (M_PI/180.0));
-			if (trigger()->armed()) {
+			if (v->armed()) {
 				solid = true;
 			} else {
 				solid = false;
@@ -374,7 +380,7 @@ TriggerEntry::draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float sz,
 
 	set_source_rgba (context, UIConfiguration::instance ().color ("neutral:midground"));
 
-	switch (trigger ()->launch_style ()) {
+	switch (v->launch_style ()) {
 		case Trigger::Toggle:
 			if (active) {
 				/* special case: now it's a square Stop button */
@@ -507,7 +513,12 @@ TriggerEntry::render (ArdourCanvas::Rect const& area, Cairo::RefPtr<Cairo::Conte
 
 	render_children (area, context);
 
-	if (trigger ()->cue_isolated ()) {
+	std::shared_ptr<Trigger const> const v (view ());
+	if (!v) {
+		return;
+	}
+
+	if (v->cue_isolated ()) {
 		/* left shadow */
 		context->save ();
 		context->translate (self.x0, self.y0 - 0.5);
@@ -539,11 +550,11 @@ TriggerEntry::render (ArdourCanvas::Rect const& area, Cairo::RefPtr<Cairo::Conte
 	}
 
 	/* follow-action icon */
-	if (trigger ()->playable () && trigger ()->will_follow ()) {
+	if (v->playable () && v->will_follow ()) {
 		context->save ();
 		context->translate (self.x0, self.y0 - 0.5);
 		context->translate (width - height, 0); // right side of the widget
-		draw_follow_icon (context, trigger ()->follow_action0 (), height, scale);
+		draw_follow_icon (context, v->follow_action0 (), height, scale);
 		context->restore ();
 	}
 }
@@ -552,8 +563,9 @@ void
 TriggerEntry::on_trigger_changed (PropertyChange const& change)
 {
 	if (change.contains (ARDOUR::Properties::name)) {
-		if (trigger ()->playable ()) {
-			name_text->set (short_version (trigger ()->name (), 16));
+		std::shared_ptr<Trigger const> const v (view ());
+		if (v && v->playable ()) {
+			name_text->set (short_version (v->name (), 16));
 		} else {
 			name_text->set ("");
 		}
@@ -608,12 +620,17 @@ TriggerEntry::set_widget_colors (TriggerEntry::EnteredState es)
 
 	follow_button->set_fill_color ((es == FollowEntered) ? hilite : bg_col);
 
-	name_text->set_color (trigger ()->color ());
+	std::shared_ptr<Trigger const> const v (view ());
+	if (!v) {
+		return;
+	}
+
+	name_text->set_color (v->color ());
 	name_text->set_fill_color (UIConfiguration::instance ().color ("neutral:midground"));
 
 	/* Spite: a loaded clip is a block of its color (its track's unless the
 	 * user picked one), with readable text, like Live's clip slots */
-	if (trigger ()->playable ()) {
+	if (v->playable ()) {
 		const color_t clip = clip_color ();
 		const color_t fill = (es == NameEntered) ? HSV (clip).lighter (0.15).color () : clip;
 		name_button->set_fill_color (fill);
@@ -628,7 +645,8 @@ TriggerEntry::set_widget_colors (TriggerEntry::EnteredState es)
 	}
 
 	/*draw a box around 'queued' trigger*/
-	if (!trigger ()->active () && trigger ()->box ().currently_playing () == trigger ()) {
+	TriggerPtr const t (trigger_if_any ());
+	if (t && !t->active () && tref.box ()->currently_playing () == t) {
 		play_button->set_outline_color (UIConfiguration::instance ().color ("neutral:foreground"));
 	}
 }
@@ -682,30 +700,30 @@ TriggerEntry::name_button_event (GdkEvent* ev)
 bool
 TriggerEntry::play_button_event (GdkEvent* ev)
 {
-	if (!trigger ()->playable ()) {
+	std::shared_ptr<Trigger const> const v (view ());
+
+	if (!v || !v->playable ()) {
 		/* empty slot; this is just a stop button */
 		switch (ev->type) {
 			case GDK_BUTTON_PRESS:
 				if (ev->button.button == 1) {
-					if (trigger()->box().record_enabled()) {
+					TriggerBox& box (triggerbox ());
+					if (box.record_enabled()) {
 						/* this is a record button */
-						if (trigger()->armed()) {
-							trigger()->disarm ();
-						} else {
-							if (Keyboard::modifier_state_equals (ev->button.state, Keyboard::PrimaryModifier)) {
-								/* Record till done */
-								trigger()->arm ();
-							} else {
-								/* use trigger capture duration */
-								trigger()->arm ();
-							}
+						TriggerPtr const t (trigger_if_any ());
+						if (t && t->armed()) {
+							t->disarm ();
+						} else if (TriggerPtr w = writable ()) {
+							/* Record till done (with Primary), or for the
+							 * trigger's capture duration: both arm () */
+							w->arm ();
 						}
-						return true;
 					} else if (Keyboard::modifier_state_equals (ev->button.state, Keyboard::PrimaryModifier)) {
-						trigger ()->box ().stop_all_immediately ();
+						box.stop_all_immediately ();
 					} else {
-						trigger ()->box ().stop_all_quantized ();
+						box.stop_all_quantized ();
 					}
+					return true; /* Spite: there is nothing to launch */
 				}
 				break;
 			default:
@@ -718,13 +736,15 @@ TriggerEntry::play_button_event (GdkEvent* ev)
 		case GDK_BUTTON_PRESS:
 			switch (ev->button.button) {
 				case 1:
-					if (trigger ()->launch_style () == Trigger::Gate ||
-					    trigger ()->launch_style () == Trigger::Repeat) {
-						trigger ()->bang ();
-						_grabbed = true;
-						play_button->grab ();
-					} else {
-						trigger ()->bang ();
+					if (TriggerPtr t = trigger_if_any ()) {
+						if (t->launch_style () == Trigger::Gate ||
+						    t->launch_style () == Trigger::Repeat) {
+							t->bang ();
+							_grabbed = true;
+							play_button->grab ();
+						} else {
+							t->bang ();
+						}
 					}
 				default:
 					break;
@@ -734,7 +754,9 @@ TriggerEntry::play_button_event (GdkEvent* ev)
 			switch (ev->button.button) {
 			case 1:
 				if (_grabbed) {
-					trigger ()->unbang ();
+					if (TriggerPtr t = trigger_if_any ()) {
+						t->unbang ();
+					}
 					play_button->ungrab ();
 					_grabbed = false;
 				}
@@ -742,9 +764,9 @@ TriggerEntry::play_button_event (GdkEvent* ev)
 			case 2:
 				if (Keyboard::modifier_state_equals (ev->button.state, Keyboard::PrimaryModifier)) {
 					/* begin/end MIDI Learn */
-					if (trigger()) {
-						if (trigger()->box().learning()) {
-							trigger()->box().stop_midi_learn ();
+					if (tref.box ()) {
+						if (triggerbox ().learning()) {
+							triggerbox ().stop_midi_learn ();
 						} else {
 							trigger_midi_learn ();
 						}
@@ -808,7 +830,7 @@ TriggerEntry::follow_button_event (GdkEvent* ev)
 bool
 TriggerEntry::event (GdkEvent* ev)
 {
-	if (!trigger ()->playable ()) {
+	if (!view () || !view ()->playable ()) {
 		return false;
 	}
 
@@ -903,7 +925,8 @@ TriggerEntry::drag_begin (Glib::RefPtr<Gdk::DragContext> const& context)
 		/* ctx leaves scope, cr is destroyed, and pixmap surface is flush()ed */
 	}
 
-	std::shared_ptr<Region> region = trigger ()->the_region ();
+	TriggerPtr const        t (trigger_if_any ());
+	std::shared_ptr<Region> region = t ? t->the_region () : std::shared_ptr<Region> ();
 	if (region) {
 		PublicEditor::instance ().pbdid_dragged_dt = region->data_type ();
 	} else {
@@ -930,14 +953,18 @@ TriggerEntry::drag_data_get (Glib::RefPtr<Gdk::DragContext> const&, Gtk::Selecti
 		 */
 		return;
 	}
+	TriggerPtr const t (trigger_if_any ());
+	if (!t) {
+		return; /* an empty slot has nothing to drag */
+	}
 	if (data.get_target () == "x-ardour/region.pbdid") {
-		std::shared_ptr<Region> region = trigger ()->the_region ();
+		std::shared_ptr<Region> region = t->the_region ();
 		if (region) {
 			data.set (data.get_target (), region->id ().to_s ());
 		}
 	}
 	if (data.get_target () == "x-ardour/trigger.pbdid") {
-		data.set (data.get_target (), trigger()->id ().to_s ());
+		data.set (data.get_target (), t->id ().to_s ());
 	}
 }
 
@@ -1397,7 +1424,7 @@ TriggerBoxUI::entry_by_trigger (Trigger const & trigger) const
 		return nullptr;
 	}
 	TriggerEntry* e = entry_for_slot (trigger.index ());
-	return (e && e->trigger ().get () == &trigger) ? e : nullptr;
+	return (e && e->trigger_if_any ().get () == &trigger) ? e : nullptr;
 }
 
 /* ********************************************** */

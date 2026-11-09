@@ -150,7 +150,7 @@ TriggerUI::connect_to_trigger ()
 {
 	trigger_connections.drop_connections ();
 
-	TriggerPtr t (trigger ());
+	TriggerPtr t (trigger_if_any ()); /* an empty slot may have none */
 	if (t) {
 		t->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
 	}
@@ -164,7 +164,8 @@ TriggerUI::connect_to_trigger ()
 uint32_t
 TriggerUI::clip_color () const
 {
-	uint32_t c = trigger ()->color ();
+	std::shared_ptr<Trigger const> const v (view ());
+	uint32_t c = v ? v->color () : follow_track_color;
 	if (c == follow_track_color) {
 		ARDOUR::Stripable* s = dynamic_cast<ARDOUR::Stripable*> (tref.box ()->owner ());
 		if (s && s->presentation_info ().color ()) {
@@ -177,7 +178,9 @@ TriggerUI::clip_color () const
 void
 TriggerUI::use_track_color ()
 {
-	trigger ()->set_color (follow_track_color);
+	if (TriggerPtr t = writable ()) {
+		t->set_color (follow_track_color);
+	}
 }
 
 void
@@ -197,12 +200,11 @@ TriggerUI::choose_color (Gtk::Window* parent)
 	}
 
 	_color_dialog->signal_response().connect ([this](int response) {
-		if (!trigger()) {
-			return;
-		}
 		switch (response) {
 		case Gtk::RESPONSE_OK:
-			trigger()->set_color (Gtkmm2ext::gdk_color_to_rgba (_color_dialog->get_color_selection()->get_current_color()));
+			if (TriggerPtr t = writable ()) {
+				t->set_color (Gtkmm2ext::gdk_color_to_rgba (_color_dialog->get_color_selection()->get_current_color()));
+			}
 			break;
 		default:
 			break;
@@ -277,7 +279,7 @@ TriggerUI::sample_chosen (int response)
 	std::list<std::string> paths = _file_chooser->get_filenames ();
 
 	for (std::list<std::string>::iterator s = paths.begin (); s != paths.end (); ++s) {
-		trigger()->box().set_from_path (trigger()->index(), *s);
+		tref.box ()->set_from_path (tref.slot (), *s);
 	}
 }
 
@@ -300,7 +302,7 @@ TriggerUI::context_menu ()
 	items.push_back (SeparatorElem());
 	items.push_back (MenuElem (_("Color..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::choose_color), (Gtk::Window*)NULL)));
 	items.push_back (MenuElem (_("Use Track Color"), sigc::mem_fun (*this, &TriggerUI::use_track_color)));
-	items.back ().set_sensitive (trigger ()->color () != follow_track_color);
+	items.back ().set_sensitive (view () && view ()->color () != follow_track_color);
 	items.push_back (MenuElem (_("Clear"), sigc::mem_fun (*this, &TriggerUI::clear_trigger)));
 	items.push_back (SeparatorElem());
 	items.push_back (MenuElem (_("MIDI Learn"), sigc::mem_fun (*this, &TriggerUI::trigger_midi_learn)));
@@ -321,7 +323,7 @@ TriggerUI::trigger_learning_finished (ArdourWidgets::PopUp* prompter)
 void
 TriggerUI::trigger_midi_learn ()
 {
-	if (!trigger()) {
+	if (!tref.box ()) {
 		return;
 	}
 
@@ -329,7 +331,7 @@ TriggerUI::trigger_midi_learn ()
 	prompter->set_text (_("operate controller now"));
 	prompter->touch (); // shows popup
 	tref.box()->TriggerMIDILearned.connect (learning_connection, invalidator (*this), std::bind (&TriggerUI::trigger_learning_finished, this, prompter), gui_context());
-	tref.box()->begin_midi_learn (trigger()->index());
+	tref.box()->begin_midi_learn (tref.slot ());
 }
 
 void
@@ -341,7 +343,7 @@ TriggerUI::trigger_stop_midi_learn ()
 void
 TriggerUI::trigger_midi_unlearn ()
 {
-	tref.box()->midi_unlearn (trigger()->index());
+	tref.box()->midi_unlearn (tref.slot ());
 }
 
 void
@@ -352,6 +354,8 @@ TriggerUI::launch_context_menu ()
 	using namespace Temporal;
 
 	delete _launch_context_menu;
+
+	std::shared_ptr<Trigger const> const v (view ()); /* Spite: an empty slot shows the defaults */
 
 	_launch_context_menu   = new Menu;
 	MenuList& items = _launch_context_menu->items ();
@@ -364,23 +368,23 @@ TriggerUI::launch_context_menu ()
 	MenuList& litems      = launch_menu->items ();
 
 	litems.push_back (RadioMenuElem (lagroup, TriggerUI::launch_style_to_string(Trigger::OneShot), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_launch_style), Trigger::OneShot)));
-	if (trigger ()->launch_style () == Trigger::OneShot) {
+	if (v && v->launch_style () == Trigger::OneShot) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&litems.back ())->set_active (true);
 	}
 	litems.push_back (RadioMenuElem (lagroup, TriggerUI::launch_style_to_string(Trigger::ReTrigger), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_launch_style), Trigger::ReTrigger)));
-	if (trigger ()->launch_style () == Trigger::ReTrigger) {
+	if (v && v->launch_style () == Trigger::ReTrigger) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&litems.back ())->set_active (true);
 	}
 	litems.push_back (RadioMenuElem (lagroup, TriggerUI::launch_style_to_string(Trigger::Gate), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_launch_style), Trigger::Gate)));
-	if (trigger ()->launch_style () == Trigger::Gate) {
+	if (v && v->launch_style () == Trigger::Gate) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&litems.back ())->set_active (true);
 	}
 	litems.push_back (RadioMenuElem (lagroup, TriggerUI::launch_style_to_string(Trigger::Toggle), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_launch_style), Trigger::Toggle)));
-	if (trigger ()->launch_style () == Trigger::Toggle) {
+	if (v && v->launch_style () == Trigger::Toggle) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&litems.back ())->set_active (true);
 	}
 	litems.push_back (RadioMenuElem (lagroup, TriggerUI::launch_style_to_string(Trigger::Repeat), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_launch_style), Trigger::Repeat)));
-	if (trigger ()->launch_style () == Trigger::Repeat) {
+	if (v && v->launch_style () == Trigger::Repeat) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&litems.back ())->set_active (true);
 	}
 
@@ -402,52 +406,52 @@ TriggerUI::launch_context_menu ()
 
 	b = BBT_Offset (4, 0, 0);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (2, 0, 0);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (1, 0, 0);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (0, 2, 0);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (0, 1, 0);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (0, 0, ticks_per_beat / 2);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (0, 0, ticks_per_beat / 4);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (0, 0, ticks_per_beat / 8);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (0, 0, ticks_per_beat / 16);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 	b = BBT_Offset (-1, 0, 0);
 	qitems.push_back (RadioMenuElem (qgroup, TriggerUI::quantize_length_to_string (b), sigc::bind(sigc::mem_fun (*this, &TriggerUI::set_quantization), b)));
-	if (trigger ()->quantization () == b) {
+	if (v && v->quantization () == b) {
 		dynamic_cast<Gtk::CheckMenuItem*> (&qitems.back ())->set_active (true);
 	}
 
@@ -455,7 +459,7 @@ TriggerUI::launch_context_menu ()
 	items.push_back (MenuElem (_("Quantization..."), *quant_menu));
 
 	items.push_back (CheckMenuElem (_("Cue Isolate"), sigc::mem_fun (*this, &TriggerUI::toggle_trigger_isolated)));
-	if (trigger ()->cue_isolated ()) {
+	if (v && v->cue_isolated ()) {
 		PBD::Unwinder<bool> uw (_ignore_menu_action, true);
 		dynamic_cast<Gtk::CheckMenuItem*> (&items.back ())->set_active (true);
 	}
@@ -531,13 +535,17 @@ TriggerUI::toggle_trigger_isolated ()
 		return;
 	}
 
-	trigger()->set_cue_isolated (!trigger()->cue_isolated ());
+	if (TriggerPtr t = writable ()) {
+		t->set_cue_isolated (!t->cue_isolated ()); /* TODO (step 2): set_has_stop () for an empty slot */
+	}
 }
 
 void
 TriggerUI::clear_trigger ()
 {
-	trigger()->set_region (std::shared_ptr<Region>());
+	if (TriggerPtr t = trigger_if_any ()) { /* TODO (step 2): the box's clear_slot () */
+		t->set_region (std::shared_ptr<Region>());
+	}
 }
 
 void
@@ -552,20 +560,26 @@ TriggerUI::set_follow_action (FollowAction const & fa)
 		return;
 	}
 
-	trigger()->set_follow_action0 (fa);
-	trigger()->set_follow_action_probability (0);
+	if (TriggerPtr t = writable ()) {
+		t->set_follow_action0 (fa);
+		t->set_follow_action_probability (0);
+	}
 }
 
 void
 TriggerUI::set_launch_style (Trigger::LaunchStyle ls)
 {
-	trigger()->set_launch_style (ls);
+	if (TriggerPtr t = writable ()) {
+		t->set_launch_style (ls);
+	}
 }
 
 void
 TriggerUI::set_quantization (Temporal::BBT_Offset const& q)
 {
-	trigger()->set_quantization (q);
+	if (TriggerPtr t = writable ()) {
+		t->set_quantization (q);
+	}
 }
 
 void
@@ -579,10 +593,10 @@ TriggerUI::set_from_selection ()
 		return;
 	}
 
-	int n = trigger()->index();
+	int n = tref.slot ();
 
 	for (RegionSelection::iterator r = rselection.begin (); r != rselection.end (); ++r) {
-		trigger()->box().set_from_selection (n, (*r)->region ());
+		tref.box ()->set_from_selection (n, (*r)->region ());
 		++n;
 	}
 }
@@ -694,9 +708,23 @@ TriggerUI::stretch_mode_to_string (Trigger::StretchMode sm)
 }
 
 TriggerPtr
-TriggerUI::trigger() const
+TriggerUI::trigger_if_any () const
 {
-	return tref.trigger();
+	return tref.trigger ();
+}
+
+std::shared_ptr<Trigger const>
+TriggerUI::view () const
+{
+	/* TODO (step 2): the box's defaults () for an empty slot */
+	return tref.trigger ();
+}
+
+TriggerPtr
+TriggerUI::writable () const
+{
+	/* TODO (step 2): the box's materialize (slot) for an empty slot */
+	return tref.trigger ();
 }
 
 void
@@ -722,8 +750,8 @@ TriggerUI::set_trigger (ARDOUR::TriggerReference tr)
 	}
 
 	if (_color_dialog) {
-		if (trigger()) {
-			Gdk::Color c = Gtkmm2ext::gdk_color_from_rgba(trigger()->color());
+		if (std::shared_ptr<Trigger const> v = view ()) {
+			Gdk::Color c = Gtkmm2ext::gdk_color_from_rgba(v->color());
 			_color_dialog->get_color_selection()->set_previous_color (c);
 			_color_dialog->get_color_selection()->set_current_color (c);
 		} else {

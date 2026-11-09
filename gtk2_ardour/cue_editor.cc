@@ -727,7 +727,7 @@ CueEditor::setup_record_blink ()
 		rec_blink_connection.disconnect ();
 		break;
 	case Enabled:
-		if (!UIConfiguration::instance().get_no_strobe() && ref.trigger()->armed()) {
+		if (!UIConfiguration::instance().get_no_strobe() && ref.trigger() && ref.trigger()->armed()) { /* Spite: an empty slot may have no trigger */
 			rec_blink_connection = Timers::blink_connect (sigc::mem_fun (*this, &CueEditor::blink_rec_enable));
 		} else {
 			rec_enable_button.set_active_state (Gtkmm2ext::Off);

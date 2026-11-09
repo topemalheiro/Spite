@@ -74,8 +74,18 @@ public:
 	static void                     setup_actions_and_bindings ();
 
 	ARDOUR::TriggerReference trigger_reference() const { return tref; }
-	ARDOUR::TriggerPtr       trigger() const;
-	ARDOUR::TriggerBox&		 triggerbox() const { return trigger()->box(); }
+
+	/* Spite: unlimited scenes (plan step 2). An empty slot may have no
+	 * Trigger: trigger_if_any () is null then. What a slot shows comes from
+	 * view () (its Trigger, or the box's defaults for an empty slot), and
+	 * what changes a slot goes through writable () (which gives an empty
+	 * slot a Trigger first). Until the engine's defaults () and
+	 * materialize () exist, both are trigger_if_any ().
+	 */
+	ARDOUR::TriggerPtr                     trigger_if_any () const;
+	std::shared_ptr<ARDOUR::Trigger const> view () const;
+	ARDOUR::TriggerPtr                     writable () const;
+	ARDOUR::TriggerBox&                    triggerbox () const { return *tref.box (); }
 
 	void choose_color (Gtk::Window*);
 

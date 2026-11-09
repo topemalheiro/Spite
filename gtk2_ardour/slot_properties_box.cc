@@ -401,13 +401,15 @@ SlotPropertyTable::set_quantize (BBT_Offset bbo)
 	}
 #endif
 
-	trigger()->set_quantization (bbo);
+	if (TriggerPtr t = writable ()) {
+		t->set_quantization (bbo);
+	}
 }
 
 void
 SlotPropertyTable::patch_button_event ()
 {
-	std::shared_ptr<Trigger> trigr = trigger();
+	std::shared_ptr<Trigger> trigr = writable (); /* the patches are the slot's own */
 	if (std::dynamic_pointer_cast<MIDITrigger> (trigr)) {
 		SessionObject* obj = trigr->box ().owner ();
 		std::shared_ptr<Stripable> stripable = obj->session().stripable_by_id (obj->id ());
@@ -425,7 +427,9 @@ SlotPropertyTable::allow_button_event (GdkEvent* ev)
 
 	switch (ev->type) {
 	case GDK_BUTTON_PRESS:
-		trigger()->set_allow_patch_changes (!trigger()->allow_patch_changes());
+		if (TriggerPtr t = writable ()) {
+			t->set_allow_patch_changes (!t->allow_patch_changes());
+		}
 		return true;
 
 	default:
@@ -445,13 +449,18 @@ SlotPropertyTable::follow_length_event ()
 
 	int beatz = (int) _follow_length_adjustment.get_value();
 
-	int metrum_numerator = trigger()->meter().divisions_per_bar();
+	TriggerPtr t (writable ());
+	if (!t) {
+		return;
+	}
+
+	int metrum_numerator = t->meter().divisions_per_bar();
 
 	int bars = beatz/metrum_numerator;
 	int beats = beatz%metrum_numerator;
 
-	trigger()->set_follow_length(Temporal::BBT_Offset(bars,beats,0));
-	trigger()->set_use_follow_length (true);  //if the user is adjusting follow-length, they want to use it
+	t->set_follow_length(Temporal::BBT_Offset(bars,beats,0));
+	t->set_use_follow_length (true);  //if the user is adjusting follow-length, they want to use it
 }
 
 void
@@ -461,7 +470,9 @@ SlotPropertyTable::follow_count_event ()
 		return;
 	}
 
-	trigger()->set_follow_count ((int) _follow_count_adjustment.get_value());
+	if (TriggerPtr t = writable ()) {
+		t->set_follow_count ((int) _follow_count_adjustment.get_value());
+	}
 }
 
 void
@@ -471,7 +482,9 @@ SlotPropertyTable::velocity_adjusted ()
 		return;
 	}
 
-	trigger()->set_velocity_effect (_velocity_adjustment.get_value());
+	if (TriggerPtr t = writable ()) {
+		t->set_velocity_effect (_velocity_adjustment.get_value());
+	}
 }
 
 void
@@ -481,7 +494,9 @@ SlotPropertyTable::probability_adjusted ()
 		return;
 	}
 
-	trigger()->set_follow_action_probability ((int) _follow_probability_adjustment.get_value());
+	if (TriggerPtr t = writable ()) {
+		t->set_follow_action_probability ((int) _follow_probability_adjustment.get_value());
+	}
 }
 
 bool
@@ -493,7 +508,9 @@ SlotPropertyTable::use_follow_length_event (GdkEvent* ev)
 
 	switch (ev->type) {
 	case GDK_BUTTON_PRESS:
-		trigger()->set_use_follow_length (!trigger()->use_follow_length());
+		if (TriggerPtr t = writable ()) {
+			t->set_use_follow_length (!t->use_follow_length());
+		}
 		return true;
 
 	default:
@@ -512,7 +529,9 @@ SlotPropertyTable::gain_change_event ()
 
 	float coeff = dB_to_coefficient(_gain_adjustment.get_value());
 
-	trigger()->set_gain(coeff);
+	if (TriggerPtr t = writable ()) {
+		t->set_gain(coeff);
+	}
 }
 
 
@@ -525,7 +544,9 @@ SlotPropertyTable::legato_button_event (GdkEvent* ev)
 
 	switch (ev->type) {
 	case GDK_BUTTON_PRESS:
-		trigger()->set_legato (!trigger()->legato());
+		if (TriggerPtr t = writable ()) {
+			t->set_legato (!t->legato());
+		}
 		return true;
 
 	default:
@@ -544,7 +565,9 @@ SlotPropertyTable::isolate_button_event (GdkEvent* ev)
 
 	switch (ev->type) {
 	case GDK_BUTTON_PRESS:
-		trigger()->set_cue_isolated (!trigger()->cue_isolated());
+		if (TriggerPtr t = writable ()) { /* TODO (step 2): set_has_stop () for an empty slot */
+			t->set_cue_isolated (!t->cue_isolated());
+		}
 		return true;
 
 	default:
@@ -561,7 +584,9 @@ SlotPropertyTable::set_launch_style (Trigger::LaunchStyle ls)
 		return;
 	}
 
-	trigger()->set_launch_style (ls);
+	if (TriggerPtr t = writable ()) {
+		t->set_launch_style (ls);
+	}
 }
 
 void
@@ -571,10 +596,14 @@ SlotPropertyTable::set_follow_action (FollowAction const & fa, uint64_t idx)
 		return;
 	}
 
+	TriggerPtr t (writable ());
+	if (!t) {
+		return;
+	}
 	if (idx == 0) {
-		trigger()->set_follow_action0 (fa);
+		t->set_follow_action0 (fa);
 	} else {
-		trigger()->set_follow_action1 (fa);
+		t->set_follow_action1 (fa);
 	}
 }
 
@@ -603,12 +632,14 @@ SlotPropertyTable::fill_jump_menus (uint32_t n_scenes)
 void
 SlotPropertyTable::on_trigger_set ()
 {
-	std::shared_ptr<Trigger> trigr = trigger();
 	fill_jump_menus (triggerbox ().n_triggers ()); /* Spite: one entry per scene */
-	if (std::dynamic_pointer_cast<MIDITrigger> (trigr)) {
-		SessionObject* obj = triggerbox ().owner ();
-		std::shared_ptr<Stripable> stripable = obj->session().stripable_by_id (obj->id ());
-		_patch_change_window.reset (std::dynamic_pointer_cast<Route> (stripable), std::dynamic_pointer_cast<MIDITrigger> (trigr));
+	if (std::dynamic_pointer_cast<MIDITrigger const> (view ())) {
+		/* an empty slot gets its patch window when it is first opened (patch_button_event) */
+		if (std::shared_ptr<MIDITrigger> mt = std::dynamic_pointer_cast<MIDITrigger> (trigger_if_any ())) {
+			SessionObject* obj = triggerbox ().owner ();
+			std::shared_ptr<Stripable> stripable = obj->session().stripable_by_id (obj->id ());
+			_patch_change_window.reset (std::dynamic_pointer_cast<Route> (stripable), mt);
+		}
 		_patch_button.show();
 		_allow_button.show();
 	} else {
@@ -620,7 +651,7 @@ SlotPropertyTable::on_trigger_set ()
 void
 SlotPropertyTable::on_trigger_changed (PropertyChange const& pc)
 {
-	std::shared_ptr<Trigger> trigr (trigger());
+	std::shared_ptr<Trigger const> trigr (view ()); /* Spite: an empty slot shows the defaults */
 
 	if (!trigr) {
 		return;
@@ -771,7 +802,7 @@ SlotPropertyTable::start_rename ()
 
 	GtkRequisition r (_name_label.size_request ());
 	_nameentry.set_size_request (r.width, -1);
-	_nameentry.set_text (trigger()->name ());
+	_nameentry.set_text (view () ? view ()->name () : std::string ());
 	_namebox.remove ();
 	_namebox.add (_nameentry);
 	_nameentry.show ();
@@ -807,7 +838,9 @@ SlotPropertyTable::end_rename (bool ignore_change)
 		return;
 	}
 
-	trigger()->set_name (result);
+	if (TriggerPtr t = writable ()) {
+		t->set_name (result);
+	}
 }
 
 void

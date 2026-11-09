@@ -4181,7 +4181,8 @@ Editor::bounce_range_selection (BounceTarget target, bool with_processing)
 			if (!track) {
 				continue;
 			}
-			if (track->triggerbox()->trigger(trigger_slot)->playable()) {
+			TriggerPtr const t (track->triggerbox()->trigger(trigger_slot)); /* Spite: none for an empty slot */
+			if (t && t->playable()) {
 				overwriting = true;
 			}
 		}

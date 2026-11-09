@@ -66,7 +66,7 @@ TriggerJumpDialog::on_trigger_set ()
 
 	int r = 0;
 
-	int const n_scenes = trigger () ? (int) trigger ()->box ().n_triggers () : TriggerBox::default_triggers_per_box; /* Spite */
+	int const n_scenes = tref.box () ? (int) triggerbox ().n_triggers () : TriggerBox::default_triggers_per_box; /* Spite */
 
 	if (n_scenes > 64) {
 		/* Spite: a list of scene numbers and runs, as many scenes as there are */
@@ -124,26 +124,34 @@ TriggerJumpDialog::on_trigger_set ()
 void
 TriggerJumpDialog::button_clicked (int b)
 {
-	FollowAction jump_fa = _right_fa ? trigger()->follow_action1() : trigger()->follow_action0();
+	TriggerPtr t (writable ());
+	if (!t) {
+		return;
+	}
+	FollowAction jump_fa = _right_fa ? t->follow_action1() : t->follow_action0();
 
 	jump_fa.type = FollowAction::JumpTrigger;  //should already be the case if we are in this dialog, but let's take no chances
 	jump_fa.targets.flip(b);
 
 	if (_right_fa) {
-		trigger()->set_follow_action1(jump_fa);
+		t->set_follow_action1(jump_fa);
 	} else {
-		trigger()->set_follow_action0(jump_fa);
+		t->set_follow_action0(jump_fa);
 	}
 }
 
 void
 TriggerJumpDialog::on_trigger_changed (PropertyChange const& what)
 {
-	set_title(string_compose(_("Jump Target for: %1"), trigger()->name()));
+	std::shared_ptr<Trigger const> const v (view ());
+	if (!v) {
+		return;
+	}
+	set_title(string_compose(_("Jump Target for: %1"), v->name()));
 	
-	TriggerBox &box = trigger()->box();
+	TriggerBox &box = triggerbox ();
 
-	FollowAction jump_fa = _right_fa ? trigger()->follow_action1() : trigger()->follow_action0();
+	FollowAction jump_fa = _right_fa ? v->follow_action1() : v->follow_action0();
 
 	if (_use_runs) {
 		if (!_runs_entry.has_focus ()) {
@@ -160,7 +168,8 @@ TriggerJumpDialog::on_trigger_changed (PropertyChange const& what)
 			break;
 		}
 
-		(*b)->set_text(box.trigger(i)->name());
+		TriggerPtr const ti (box.trigger (i)); /* Spite: none for an empty slot */
+		(*b)->set_text (ti ? ti->name () : std::string ());
 		(*b)->set_active_state(jump_fa.targets.test(i) ? Gtkmm2ext::ExplicitActive : Gtkmm2ext::Off);
 
 		++b;
@@ -226,20 +235,21 @@ TriggerJumpDialog::runs_to_targets (std::string const& text, uint32_t n_scenes, 
 void
 TriggerJumpDialog::runs_activated ()
 {
-	if (!trigger ()) {
+	TriggerPtr t (writable ());
+	if (!t) {
 		return;
 	}
-	FollowAction jump_fa = _right_fa ? trigger ()->follow_action1 () : trigger ()->follow_action0 ();
-	if (!runs_to_targets (_runs_entry.get_text (), trigger ()->box ().n_triggers (), jump_fa)) {
+	FollowAction jump_fa = _right_fa ? t->follow_action1 () : t->follow_action0 ();
+	if (!runs_to_targets (_runs_entry.get_text (), triggerbox ().n_triggers (), jump_fa)) {
 		_runs_note.set_text (_("Scene numbers, and runs like 10-40, separated by commas"));
 		return;
 	}
 	_runs_note.set_text ("");
 	jump_fa.type = FollowAction::JumpTrigger;
 	if (_right_fa) {
-		trigger ()->set_follow_action1 (jump_fa);
+		t->set_follow_action1 (jump_fa);
 	} else {
-		trigger ()->set_follow_action0 (jump_fa);
+		t->set_follow_action0 (jump_fa);
 	}
 }
 

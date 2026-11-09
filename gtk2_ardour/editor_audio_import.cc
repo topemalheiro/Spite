@@ -1140,7 +1140,8 @@ Editor::finish_bringing_in_material (std::shared_ptr<Region> region,
 		if (mode == ImportAsTrigger) {
 			std::shared_ptr<Region> copy (RegionFactory::create (region, true));
 			for (int s = 0; s < (int) existing_track->triggerbox ()->n_triggers (); ++s) { /* Spite: one per scene */
-				if (!existing_track->triggerbox ()->trigger (s)->playable ()) {
+				TriggerPtr const t (existing_track->triggerbox ()->trigger (s)); /* Spite: none for an empty slot */
+				if (!t || !t->playable ()) {
 					existing_track->triggerbox ()->set_from_selection (s, copy);
 #if 1 /* assume drop from sidebar */
 					ARDOUR_UI_UTILS::copy_patch_changes (_session->the_auditioner (), existing_track->triggerbox ()->trigger (s));
