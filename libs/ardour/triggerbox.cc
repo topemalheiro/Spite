@@ -315,6 +315,10 @@ Trigger::request_trigger_delete (Trigger* t)
 void
 Trigger::_arm (Temporal::BBT_Offset const & duration)
 {
+	if (_index == UINT32_MAX) {
+		return; /* Spite: the box's defaults (TriggerBox::defaults ()), in no slot */
+	}
+
 	Track* trk = static_cast<Track*> (_box.owner());
 
 	if (trk->rec_enable_control()->get_value()) {
@@ -413,6 +417,27 @@ Trigger::set_ui_state (Trigger::UIState &state)
 	if (state.tempo > 0) {
 		set_segment_tempo(state.tempo);
 	}
+}
+
+bool
+Trigger::same_settings (Trigger const& o) const
+{
+	return launch_style () == o.launch_style ()
+		&& follow_action0 () == o.follow_action0 ()
+		&& follow_action1 () == o.follow_action1 ()
+		&& follow_action_probability () == o.follow_action_probability ()
+		&& follow_count () == o.follow_count ()
+		&& quantization () == o.quantization ()
+		&& follow_length () == o.follow_length ()
+		&& use_follow_length () == o.use_follow_length ()
+		&& legato () == o.legato ()
+		&& gain () == o.gain ()
+		&& velocity_effect () == o.velocity_effect ()
+		&& stretchable () == o.stretchable ()
+		&& cue_isolated () == o.cue_isolated ()
+		&& allow_patch_changes () == o.allow_patch_changes ()
+		&& ui_state.stretch_mode == o.ui_state.stretch_mode /* no stretch_mode () const is defined */
+		&& color () == o.color ();
 }
 
 void
@@ -516,6 +541,9 @@ Trigger::send_property_change (PropertyChange pc)
 	}
 
 	PropertyChanged (pc);
+	if (_index == UINT32_MAX) {
+		return; /* Spite: the box's defaults are in no slot: nothing for surfaces */
+	}
 	/* emit static signal for global observers */
 	TriggerPropertyChange (pc, this);
 }
@@ -3828,10 +3856,12 @@ TriggerBox::TriggerBox (Session& s, DataType dt)
 		for (uint32_t n = 0; n < n_slots; ++n) {
 			all_triggers.push_back (TriggerPtr (new AudioTrigger (n, *this), Trigger::request_trigger_delete));
 		}
+		_defaults.reset (new AudioTrigger (UINT32_MAX, *this), Trigger::request_trigger_delete);
 	} else {
 		for (uint32_t n = 0; n < n_slots; ++n) {
 			all_triggers.push_back (TriggerPtr (new MIDITrigger (n, *this), Trigger::request_trigger_delete));
 		}
+		_defaults.reset (new MIDITrigger (UINT32_MAX, *this), Trigger::request_trigger_delete);
 	}
 
 	Config->ParameterChanged.connect_same_thread (*this, std::bind (&TriggerBox::parameter_changed, this, _1));
@@ -4616,9 +4646,10 @@ TriggerBox::peek_next_trigger ()
 TriggerPtr
 TriggerBox::trigger_by_id (PBD::ID check)
 {
+	PBD::RWLock::ReaderLock lm (trigger_lock);
 	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		if (trigger (n)->id() == check) {
-			return trigger (n);
+		if (all_triggers[n]->id() == check) {
+			return all_triggers[n];
 		}
 	}
 	return TriggerPtr();
@@ -4630,7 +4661,7 @@ TriggerBox::deep_sources (std::set<std::shared_ptr<Source> >& sources)
 	PBD::RWLock::ReaderLock lm (trigger_lock);
 
 	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		std::shared_ptr<Region> r (trigger(n)->the_region ());
+		std::shared_ptr<Region> r (all_triggers[n]->the_region ()); /* Spite: the lock is held already */
 		if (r) {
 			r->deep_sources (sources);
 		}
@@ -4643,7 +4674,7 @@ TriggerBox::used_regions (std::set<std::shared_ptr<Region> >& regions)
 	PBD::RWLock::ReaderLock lm (trigger_lock);
 
 	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		std::shared_ptr<Region> r (trigger(n)->the_region ());
+		std::shared_ptr<Region> r (all_triggers[n]->the_region ()); /* Spite: the lock is held already */
 		if (r) {
 			regions.insert (r);
 		}
@@ -4794,6 +4825,8 @@ TriggerBox::set_all_launch_style (ARDOUR::Trigger::LaunchStyle ls)
 	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
 		all_triggers[n]->set_launch_style (ls);
 	}
+	_defaults->set_launch_style (ls); /* Spite: and what empty slots start from */
+	DefaultsChanged (); /* EMIT SIGNAL */
 }
 
 void
@@ -4806,6 +4839,12 @@ TriggerBox::set_all_follow_action (ARDOUR::FollowAction const & fa, uint32_t fa_
 			all_triggers[n]->set_follow_action1 (fa);
 		}
 	}
+	if (fa_n == 0) { /* Spite: and what empty slots start from */
+		_defaults->set_follow_action0 (fa);
+	} else {
+		_defaults->set_follow_action1 (fa);
+	}
+	DefaultsChanged (); /* EMIT SIGNAL */
 }
 
 void
@@ -4814,6 +4853,8 @@ TriggerBox::set_all_probability (int zero_to_hundred)
 	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
 		all_triggers[n]->set_follow_action_probability (zero_to_hundred);
 	}
+	_defaults->set_follow_action_probability (zero_to_hundred); /* Spite: and what empty slots start from */
+	DefaultsChanged (); /* EMIT SIGNAL */
 }
 
 void
@@ -4822,6 +4863,8 @@ TriggerBox::set_all_quantization (Temporal::BBT_Offset const& q)
 	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
 		all_triggers[n]->set_quantization (q);
 	}
+	_defaults->set_quantization (q); /* Spite: and what empty slots start from */
+	DefaultsChanged (); /* EMIT SIGNAL */
 }
 
 void
@@ -4890,7 +4933,112 @@ TriggerBox::trigger (Triggers::size_type n)
 		return 0;
 	}
 
+	/* Spite: with SPITE_NULL_EMPTY_SLOTS=1 an empty slot with default
+	 * settings has no Trigger here, as it won't once storage is sparse
+	 * (unlimited-scenes plan): for finding the callers that assume one
+	 */
+	static bool const null_empty = g_getenv ("SPITE_NULL_EMPTY_SLOTS") && *g_getenv ("SPITE_NULL_EMPTY_SLOTS") == '1';
+	if (null_empty && default_empty (*all_triggers[n])) {
+		return 0;
+	}
+
 	return all_triggers[n];
+}
+
+bool
+TriggerBox::default_empty (Trigger const& t) const
+{
+	return !t.playable () && !t.the_region () && !t.armed () && !t.has_pending () && t.same_settings (*_defaults);
+}
+
+bool
+TriggerBox::slot_empty (uint32_t n) const
+{
+	PBD::RWLock::ReaderLock lm (trigger_lock);
+	if (n >= all_triggers.size ()) {
+		return true;
+	}
+	Trigger const& t (*all_triggers[n]);
+	return !t.playable () && !t.the_region () && !t.has_pending ();
+}
+
+uint32_t
+TriggerBox::n_clips () const
+{
+	PBD::RWLock::ReaderLock lm (trigger_lock);
+	uint32_t c = 0;
+	for (auto const& t : all_triggers) {
+		if (t->playable () || t->the_region () || t->has_pending ()) {
+			++c;
+		}
+	}
+	return c;
+}
+
+int32_t
+TriggerBox::nth_clip_scene (uint32_t i) const
+{
+	PBD::RWLock::ReaderLock lm (trigger_lock);
+	for (uint32_t n = 0; n < all_triggers.size (); ++n) {
+		Trigger const& t (*all_triggers[n]);
+		if (t.playable () || t.the_region () || t.has_pending ()) {
+			if (i-- == 0) {
+				return n;
+			}
+		}
+	}
+	return -1;
+}
+
+TriggerPtr
+TriggerBox::materialize (uint32_t n)
+{
+	/* the slot's own Trigger, even with SPITE_NULL_EMPTY_SLOTS */
+	PBD::RWLock::ReaderLock lm (trigger_lock);
+	return n < all_triggers.size () ? all_triggers[n] : TriggerPtr ();
+}
+
+void
+TriggerBox::request_load (uint32_t n, std::shared_ptr<Region> region, std::shared_ptr<Trigger::UIState> state)
+{
+	if (!region || n >= n_triggers ()) {
+		return;
+	}
+	if (state) {
+		enqueue_trigger_state_for_region (region, state);
+	}
+	set_from_selection (n, region);
+}
+
+void
+TriggerBox::clear_slot (uint32_t n)
+{
+	/* as an empty slot will be once storage is sparse: no clip, and the
+	 * box's defaults, except for its stop button
+	 */
+	if (TriggerPtr t = materialize (n)) {
+		bool const no_stop = t->cue_isolated ();
+		t->set_region (std::shared_ptr<Region> ());
+		Trigger::UIState st;
+		_defaults->get_ui_state (st);
+		st.cue_isolated = no_stop;
+		t->set_ui_state (st);
+	}
+}
+
+bool
+TriggerBox::has_stop (uint32_t n) const
+{
+	PBD::RWLock::ReaderLock lm (trigger_lock);
+	return n >= all_triggers.size () || !all_triggers[n]->cue_isolated ();
+}
+
+void
+TriggerBox::set_has_stop (uint32_t n, bool yn)
+{
+	if (TriggerPtr t = materialize (n)) {
+		t->set_cue_isolated (!yn);
+	}
 }
 
 bool

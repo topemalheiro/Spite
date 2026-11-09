@@ -429,6 +429,8 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	Trigger* swap_pending (Trigger*);
 
 	void update_properties ();
+	/* Spite: the settings a slot keeps without a clip are the same */
+	bool same_settings (Trigger const&) const;
 
 	static Trigger * const MagicClearPointerValue;
 
@@ -925,6 +927,27 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	 * with clips, and emits EmptyStatusChanged from or to none
 	 */
 	void slot_playable_changed (bool now_playable);
+	/* Spite: empty slots (unlimited-scenes plan, step 2). Storage is still
+	 * one Trigger per slot; these are the calls that keep working once an
+	 * empty slot has none, so the GUI, Lua and surfaces use them now.
+	 */
+	bool slot_empty (uint32_t n) const;          /* no clip, none loading */
+	uint32_t n_clips () const;                   /* slots with a clip or one loading */
+	int32_t nth_clip_scene (uint32_t i) const;   /* the scene of the i-th of those, -1 past the last */
+	TriggerPtr materialize (uint32_t n);         /* a Trigger to edit or arm; null past the last scene */
+	void request_load (uint32_t n, std::shared_ptr<Region>, std::shared_ptr<Trigger::UIState> = std::shared_ptr<Trigger::UIState> ());
+	void clear_slot (uint32_t n);
+	/* an empty slot's stop button: launching its scene stops this track
+	 * (has_stop) or leaves it playing. Today this is the slot's cue-isolate.
+	 */
+	bool has_stop (uint32_t n) const;
+	void set_has_stop (uint32_t n, bool);
+	/* what an empty slot shows and a new clip starts from: never in a slot
+	 * (index UINT32_MAX), set by the set_all_* calls
+	 */
+	std::shared_ptr<Trigger const> defaults () const { return _defaults; }
+	PBD::Signal<void()> DefaultsChanged;
+
 	/* the next trigger queued to start, for surfaces (not the audio thread) */
 	TriggerPtr peek_next_trigger ();
 	/* Spite: slot n's trigger, for the audio thread (no lock) */
@@ -1095,6 +1118,8 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	std::atomic<bool> _slot_swaps_queued {true};
 	std::atomic<bool> _property_updates_queued {true};
 
+	TriggerPtr _defaults; /* Spite: see defaults () */
+	bool default_empty (Trigger const&) const; /* SPITE_NULL_EMPTY_SLOTS, see trigger () */
 	PBD::RingBuffer<uint32_t> explicit_queue; /* user queued triggers */
 	void shift_explicit_queue (uint32_t at, int delta); /* Spite */
 	TriggerPtr               _currently_playing;

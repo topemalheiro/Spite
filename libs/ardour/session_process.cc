@@ -1780,6 +1780,7 @@ Session::insert_scene (uint32_t at)
 
 	shift_cue_markers (at, 1);
 	set_dirty ();
+	ScenesShifted (at, 1); /* EMIT SIGNAL */
 	SceneCountChanged (); /* EMIT SIGNAL */
 	return true;
 }
@@ -1828,6 +1829,7 @@ Session::remove_scene (uint32_t at)
 
 	shift_cue_markers (at, -1);
 	set_dirty ();
+	ScenesShifted (at, -1); /* EMIT SIGNAL */
 	SceneCountChanged (); /* EMIT SIGNAL */
 	return true;
 }

@@ -1442,6 +1442,11 @@ public:
 	bool scene_removable (uint32_t at) const;
 	bool remove_scene (uint32_t at);
 	PBD::Signal<void()> SceneCountChanged;
+	/* Spite: scene `at` was inserted (delta 1) or removed (-1); emitted after
+	 * the boxes have shifted their slots, before SceneCountChanged, in the
+	 * thread that called insert_scene () or remove_scene ()
+	 */
+	PBD::Signal<void(uint32_t, int32_t)> ScenesShifted;
 	CueEvents const & cue_events() const { return _cue_events; }
 
 	int num_triggerboxes () const;
@@ -2495,7 +2500,7 @@ private:
 	void maybe_find_pending_cue ();
 	void clear_active_cue ();
 
-	int tb_with_filled_slots;
+	std::atomic<int> tb_with_filled_slots; /* Spite: changed from audio threads too (EmptyStatusChanged) */
 	void handle_slots_empty_status (std::weak_ptr<Route> const &);
 
 	void time_domain_changed ();
