@@ -53,6 +53,9 @@ public:
 	TriggerEntry (ArdourCanvas::Item* item, TriggerStrip&, ARDOUR::TriggerReference rf);
 	~TriggerEntry ();
 
+	/* Spite: show another slot (scenes were inserted or removed) */
+	void repoint (ARDOUR::TriggerReference);
+
 	ArdourCanvas::Rectangle* play_button;
 	ArdourCanvas::Rectangle* name_button;
 	ArdourCanvas::Rectangle* follow_button;
@@ -138,6 +141,7 @@ private:
 	typedef std::vector<TriggerEntry*> Slots;
 
 	ARDOUR::TriggerBox& _triggerbox;
+	std::vector<ARDOUR::Trigger const*> _shown; /* Spite: the trigger each row last showed, see build () */
 	Slots               _slots;
 	TriggerStrip&       _strip;
 

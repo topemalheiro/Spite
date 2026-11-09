@@ -139,6 +139,26 @@ TriggerEntry::~TriggerEntry ()
 }
 
 void
+TriggerEntry::repoint (TriggerReference tr)
+{
+	/* Spite: scenes were inserted or removed, and this row now shows slot
+	 * tr.slot (): connect to that trigger, as the constructor does
+	 */
+	_rec_enable_connections.drop_connections ();
+
+	name = string_compose ("trigger %1", tr.slot());
+	play_button->name = string_compose ("playbutton %1", tr.slot());
+
+	set_trigger (tr);
+
+	trigger()->ArmChanged.connect (_rec_enable_connections, MISSING_INVALIDATOR, std::bind (&TriggerEntry::rec_enable_change, this), gui_context());
+	tref.box()->RecEnableChanged.connect (_rec_enable_connections, MISSING_INVALIDATOR, std::bind (&TriggerEntry::rec_enable_change, this), gui_context());
+
+	selection_change ();
+	rec_enable_change ();
+}
+
+void
 TriggerEntry::rec_enable_change ()
 {
 	switch (tref.box()->record_enabled()) {
@@ -1002,52 +1022,62 @@ TriggerBoxUI::selection_changed ()
 void
 TriggerBoxUI::build ()
 {
-	TriggerPtr t;
-	uint64_t   n = 0;
-
-	/* Spite: rebuilt when scenes are inserted or removed. The editor's
-	 * selection holds the entries themselves: deselect them first (all of
-	 * them, as each change runs selection_changed () over _slots), then
-	 * select the same clips again in their new rows.
+	/* Spite: (re)built when scenes are inserted or removed. Rows are kept
+	 * and only those whose slot now holds another trigger are pointed at it
+	 * again, so that inserting a scene stays quick with hundreds of scenes on
+	 * many tracks. The editor's selection holds the rows themselves: keep it
+	 * on the same clips, which may have moved to other rows. A row's trigger ()
+	 * is looked up by slot, so what it showed is in _shown.
 	 */
-	Selection&              sel (PublicEditor::instance ().get_selection ());
-	std::vector<TriggerPtr> was_selected;
-	for (auto& slot : _slots) {
-		if (sel.selected (slot)) {
-			was_selected.push_back (slot->trigger ());
+	Selection&                          sel (PublicEditor::instance ().get_selection ());
+	std::vector<ARDOUR::Trigger const*> was_selected;
+
+	for (size_t i = 0; i < _slots.size (); ++i) {
+		if (sel.selected (_slots[i]) && i < _shown.size ()) {
+			was_selected.push_back (_shown[i]);
 		}
 	}
+	/* all of them first, as each removal runs selection_changed () over _slots */
 	for (auto& slot : _slots) {
 		if (sel.selected (slot)) {
 			sel.remove (slot);
 		}
 	}
-	for (auto& slot : _slots) {
-		delete slot;
+
+	std::shared_ptr<TriggerBox> box (_triggerbox.shared_from_this ());
+	uint32_t const              n = _triggerbox.n_triggers ();
+
+	while (_slots.size () > n) {
+		delete _slots.back ();
+		_slots.pop_back ();
 	}
+	_shown.resize (_slots.size (), 0);
 
-	_slots.clear ();
-
-	while (true) {
-		t = _triggerbox.trigger (n);
-		if (!t) {
-			break;
+	for (uint32_t i = 0; i < _slots.size (); ++i) {
+		TriggerPtr t (_triggerbox.trigger (i));
+		if (t && t.get () != _shown[i]) {
+			_slots[i]->repoint (TriggerReference (box, i));
+			_shown[i] = t.get ();
 		}
-		TriggerEntry* te = new TriggerEntry (this, _strip, TriggerReference (_triggerbox.shared_from_this(), n));
-
-		_slots.push_back (te);
-
-		++n;
 	}
 
-	for (auto& slot : _slots) {
-		if (std::find (was_selected.begin (), was_selected.end (), slot->trigger ()) != was_selected.end ()) {
-			sel.add (slot);
+	while (_slots.size () < n) {
+		uint32_t const i = _slots.size ();
+		_slots.push_back (new TriggerEntry (this, _strip, TriggerReference (box, i)));
+		TriggerPtr t (_triggerbox.trigger (i));
+		_shown.push_back (t ? t.get () : 0);
+	}
+
+	if (!was_selected.empty ()) {
+		for (size_t i = 0; i < _slots.size (); ++i) {
+			if (std::find (was_selected.begin (), was_selected.end (), _shown[i]) != was_selected.end ()) {
+				sel.add (_slots[i]);
+			}
 		}
 	}
 
 	if (n > 0) {
-		/* lay the new rows out */
+		/* lay the rows out */
 		ArdourCanvas::Rect const r (get ());
 		if (r.height () > 0) {
 			_size_allocate (r);

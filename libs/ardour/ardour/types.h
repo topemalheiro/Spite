@@ -958,13 +958,13 @@ struct FollowAction {
 		JumpTrigger,
 	};
 
-	/* We could theoretically limit this to default_triggers_per_box but
-	 * doing it this way makes it likely that this will not change. Could
-	 * be worth a constexpr-style compile time assert to check
-	 * default_triggers_per_box < 64
+	/* Spite: one bit per scene a jump can go to. This sets the most scenes
+	 * a session can have (TriggerBox::max_triggers_per_box). to_string ()
+	 * keeps the old format, a 64-bit number, while only the first 64 scenes
+	 * are named, so older builds still read those sessions.
 	 */
-
-	typedef std::bitset<64> Targets;
+	static const size_t max_targets = 1024;
+	typedef std::bitset<max_targets> Targets;
 
 	Type type;
 	Targets targets;
@@ -975,11 +975,11 @@ struct FollowAction {
 	FollowAction (std::string const &);
 
 	static Targets target_any () { Targets t; t.set(); return t; }
-	static Targets target_other (uint8_t skip) { Targets t; t.set (); t.reset (skip); return t; }
-	static Targets target_next_wrap (uint8_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } else { t.set (0); } return t; }
-	static Targets target_prev_wrap (uint8_t from) { Targets t; if (from) { t.set (from - 1); } else { t.set (t.size() - 1); } return t; }
-	static Targets target_next_nowrap (uint8_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } return t; }
-	static Targets target_prev_nowrap (uint8_t from) { Targets t; if (from) { t.set (from - 1); } return t; }
+	static Targets target_other (uint32_t skip) { Targets t; t.set (); t.reset (skip); return t; }
+	static Targets target_next_wrap (uint32_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } else { t.set (0); } return t; }
+	static Targets target_prev_wrap (uint32_t from) { Targets t; if (from) { t.set (from - 1); } else { t.set (t.size() - 1); } return t; }
+	static Targets target_next_nowrap (uint32_t from) { Targets t; if (from < t.size() - 1) { t.set (from + 1); } return t; }
+	static Targets target_prev_nowrap (uint32_t from) { Targets t; if (from) { t.set (from - 1); } return t; }
 
 	bool operator!= (FollowAction const & other) const {
 		return other.type != type || other.targets != targets;

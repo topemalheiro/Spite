@@ -31,6 +31,7 @@
 #include <string>
 #include <cmath>
 #include <vector>
+#include <functional>
 #include <map>
 
 #include "ardour/types.h"
@@ -120,5 +121,12 @@ void copy_patch_changes (std::shared_ptr<ARDOUR::Auditioner>, std::shared_ptr<AR
 bool convert_drop_to_paths (std::vector<std::string>&, const Gtk::SelectionData&);
 
 void format_position (ARDOUR::Session*, Temporal::timepos_t const& pos, char* buf, size_t bufsize, bool onoff = true);
+
+/* Spite: one menu item per scene, labelled label (n) (cue_marker_name ()
+ * when empty), calling action (n). Past 32 scenes they go into submenus of
+ * 32 ("1-32", "33-64", ...), so a session with hundreds of scenes still has
+ * usable menus.
+ */
+void add_scene_menu_items (Gtk::Menu_Helpers::MenuList&, uint32_t n_scenes, sigc::slot<void, uint32_t> action, std::function<std::string (uint32_t)> label = std::function<std::string (uint32_t)> ());
 
 } // namespace

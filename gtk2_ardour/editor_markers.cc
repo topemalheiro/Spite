@@ -1129,10 +1129,8 @@ Editor::build_marker_menu (Location* loc)
 	if (loc->is_cue_marker()) {
 		Menu *cues_menu = manage (new Menu());
 		MenuList& cue_items (cues_menu->items());
-		for (int32_t n = 0; n < (int32_t) _session->scene_count (); ++n) { /* Spite: one per scene */
-			/* XXX the "letter" names of the cues need to be subject to i18n somehow */
-			cue_items.push_back (MenuElem (cue_marker_name (n), sigc::bind (sigc::mem_fun(*this, &Editor::marker_menu_change_cue), n)));
-		}
+		/* Spite: one per scene, grouped when there are many */
+		ARDOUR_UI_UTILS::add_scene_menu_items (cue_items, _session->scene_count (), [this] (uint32_t n) { marker_menu_change_cue (n); });
 		items.push_back (Menu_Helpers::MenuElem ("Set Cue:", *cues_menu));
 		/* TODO: tweak marker_menu_range_to_next to make a range between 2 Cues? */
 

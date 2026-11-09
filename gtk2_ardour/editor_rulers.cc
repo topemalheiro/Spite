@@ -321,9 +321,10 @@ Editor::popup_ruler_menu (timepos_t const & where, ItemType t)
 		Gtk::Menu* cue_menu = new Gtk::Menu;
 		MenuList& cue_items = cue_menu->items();
 		cue_items.push_back (MenuElem (_("Stop All Cues"), sigc::bind (sigc::mem_fun (*this, &Editor::add_location_mark_with_flag), where, Location::Flags(Location::IsMark |Location::IsCueMarker), CueRecord::stop_all)));
-		for (int32_t n = 0; n < (int32_t) _session->scene_count (); ++n) { /* Spite: one per scene */
-			cue_items.push_back (MenuElem (string_compose (_("Cue %1"), cue_marker_name (n)), sigc::bind (sigc::mem_fun(*this, &Editor::add_location_mark_with_flag), where, Location::Flags(Location::IsMark |Location::IsCueMarker), n)));
-		}
+		/* Spite: one per scene, grouped when there are many */
+		ARDOUR_UI_UTILS::add_scene_menu_items (cue_items, _session->scene_count (),
+				[this, where] (uint32_t n) { add_location_mark_with_flag (where, Location::Flags (Location::IsMark | Location::IsCueMarker), n); },
+				[] (uint32_t n) { return string_compose (_("Cue %1"), cue_marker_name (n)); });
 		cue_submenu.set_submenu (*cue_menu);
 
 		add_items.push_back (SeparatorElem());

@@ -618,12 +618,13 @@ TriggerUI::follow_context_menu (GdkEventButton* ev)
 	Menu*     jump_menu = manage (new Menu);
 	MenuList& jitems      = jump_menu->items ();
 	jitems.push_back (MenuElem (_("Multi..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::edit_jump), false)));
-	uint32_t const n_scenes = tref.box () ? tref.box ()->n_triggers () : TriggerBox::default_triggers_per_box; /* Spite */
-	for (uint32_t i = 0; i < n_scenes; i++) {
-		FollowAction jump_fa = (FollowAction::JumpTrigger);
-		jump_fa.targets.set(i);
-		jitems.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &TriggerUI::set_follow_action), jump_fa)));
-	}
+	/* Spite: one per scene, grouped when there are many */
+	uint32_t const n_scenes = tref.box () ? tref.box ()->n_triggers () : TriggerBox::default_triggers_per_box;
+	ARDOUR_UI_UTILS::add_scene_menu_items (jitems, n_scenes, [this] (uint32_t i) {
+		FollowAction jump_fa (FollowAction::JumpTrigger);
+		jump_fa.targets.set (i);
+		set_follow_action (jump_fa);
+	});
 
 	items.push_back (MenuElem (_("Jump"), *jump_menu));
 

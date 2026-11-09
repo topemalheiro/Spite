@@ -256,11 +256,12 @@ CueBoxUI::context_menu (GdkEventButton* ev, uint64_t idx)
 	fitems.push_back (MenuElem (TriggerUI::follow_action_to_string(FollowAction (FollowAction::ForwardTrigger)), sigc::bind (sigc::mem_fun (*this, &CueBoxUI::set_all_follow_action), FollowAction (FollowAction::ForwardTrigger), idx)));
 		Menu*     jump_menu = manage (new Menu);
 		MenuList& jitems      = jump_menu->items ();
-		for (int i = 0; i < (int) _slots.size (); i++) {
-			FollowAction jump_fa = (FollowAction::JumpTrigger);
-			jump_fa.targets.set(i);
-			jitems.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &CueBoxUI::set_all_follow_action), jump_fa, idx)));
-		}
+		/* Spite: one per scene, grouped when there are many */
+		ARDOUR_UI_UTILS::add_scene_menu_items (jitems, _slots.size (), [this, idx] (uint32_t i) {
+			FollowAction jump_fa (FollowAction::JumpTrigger);
+			jump_fa.targets.set (i);
+			set_all_follow_action (jump_fa, idx);
+		});
 	fitems.push_back (MenuElem (_("Jump..."), *jump_menu));
 
 	Menu*     launch_menu = manage (new Menu);

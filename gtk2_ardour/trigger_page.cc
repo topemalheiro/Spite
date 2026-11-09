@@ -1430,10 +1430,11 @@ TriggerPage::register_actions ()
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot-alt", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 
-	/* Spite: actions for as many scenes as a session can have; slot actions
-	 * for the first 16 rows, as before scenes could be added
+	/* Spite: cue actions (key and MIDI bindings) for the first 128 scenes, not
+	 * all 1024 a session can have, which would swamp the shortcut editor;
+	 * slot actions for the first 16 rows, as before scenes could be added
 	 */
-	for (int32_t n = 0; n < TriggerBox::max_triggers_per_box; ++n) {
+	for (int32_t n = 0; n < std::min<int32_t> (128, TriggerBox::max_triggers_per_box); ++n) {
 		const std::string action_name  = string_compose ("trigger-cue-%1", n);
 		const std::string display_name = string_compose (_("Trigger Cue %1"), cue_marker_name (n));
 

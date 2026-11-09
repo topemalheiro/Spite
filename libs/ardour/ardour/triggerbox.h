@@ -339,6 +339,8 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	void set_index (uint32_t n) { _index = n; }
 	/* Spite: a region is being loaded into this slot */
 	bool has_pending () const { return _pending.load () != 0; }
+	/* Spite: UI changes not yet applied by update_properties () */
+	bool ui_state_pending () const { return ui_state.generation.load () != last_property_generation.load (); }
 	/* Spite: follow-action targets name slots: move the ones at or after
 	 * `at` by `delta` slots (a scene inserted or removed at `at`)
 	 */
@@ -880,11 +882,12 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	/* Spite: the number of slots is the session's scene count
 	 * (Session::scene_count()), which every trigger box follows. A new
 	 * session starts with default_triggers_per_box. max_triggers_per_box is
-	 * the limit, because follow actions name their target slots in a 64-bit
-	 * set (FollowAction::Targets).
+	 * the limit: follow actions name their target slots in a bitset of that
+	 * size (FollowAction::Targets), and every slot is a whole Trigger (about
+	 * 6 kB), on every track.
 	 */
 	static const int32_t default_triggers_per_box = 8;
-	static const int32_t max_triggers_per_box = 64;
+	static const int32_t max_triggers_per_box = FollowAction::max_targets;
 
 	TriggerBox (Session&, DataType dt);
 	~TriggerBox ();
@@ -934,6 +937,18 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	 * thread reads the slots without a lock.
 	 */
 	uint32_t n_triggers () const;
+
+	/* Spite: a slot posting work for the RT thread raises one of these, so
+	 * that run_cycle () only goes through every slot when there is something
+	 * to find. It used to check each slot (atomic exchanges) every cycle,
+	 * which adds up with hundreds of scenes on every track.
+	 */
+	void queue_edit_swap_check () { _edit_swaps_queued.store (true); }
+	void queue_state_request_check () { _state_requests_queued.store (true); }
+	void queue_slot_swap_check () { _slot_swaps_queued.store (true); }
+	void queue_property_update () { _property_updates_queued.store (true); }
+	void queue_all_slot_checks ();
+
 	void insert_slot (uint32_t at);
 	bool slot_removable (uint32_t at) const;
 	void remove_slot (uint32_t at);
@@ -1067,6 +1082,16 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 
 	typedef std::vector<Trigger*> PendingTriggers;
 	PendingTriggers pending;
+	/* Spite: determine_next_trigger ()'s jump targets, reserved once
+	 * (max_triggers_per_box) so the RT thread never allocates
+	 */
+	std::vector<int32_t> _possible_targets;
+
+	/* Spite: see queue_edit_swap_check (). True to start: look once. */
+	std::atomic<bool> _edit_swaps_queued {true};
+	std::atomic<bool> _state_requests_queued {true};
+	std::atomic<bool> _slot_swaps_queued {true};
+	std::atomic<bool> _property_updates_queued {true};
 
 	PBD::RingBuffer<uint32_t> explicit_queue; /* user queued triggers */
 	TriggerPtr               _currently_playing;

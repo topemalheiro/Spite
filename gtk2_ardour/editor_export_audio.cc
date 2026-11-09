@@ -363,11 +363,10 @@ Editor::bounce_region_selection (bool with_processing)
 
 			ArdourWidgets::ArdourDropdown *tslot = manage (new ArdourWidgets::ArdourDropdown ());
 
-			for (int c = 0; c < (int) _session->scene_count (); ++c) { /* Spite: one per scene */
-				std::string lbl = cue_marker_name (c);
-				tslot->add_menu_elem (Menu_Helpers::MenuElem (lbl, sigc::bind ([] (uint32_t* t, uint32_t v, ArdourWidgets::ArdourDropdown* s, std::string l) {*t = v; s->set_text (l);}, &trigger_slot, c, tslot, lbl)));
-			}
-			tslot->set_active ("A");
+			/* Spite: one per scene, grouped when there are many */
+			ARDOUR_UI_UTILS::add_scene_menu_items (tslot->menu ().items (), _session->scene_count (),
+					[&trigger_slot, tslot] (uint32_t v) { trigger_slot = v; tslot->set_text (cue_marker_name (v)); });
+			tslot->set_text (cue_marker_name (trigger_slot));
 
 			HBox *tbox = manage (new HBox());
 			tbox->pack_start(*slot_align, false, false);

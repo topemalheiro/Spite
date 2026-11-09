@@ -1023,6 +1023,34 @@ ARDOUR_UI_UTILS::copy_patch_changes (std::shared_ptr<ARDOUR::Auditioner> a, std:
 }
 
 void
+ARDOUR_UI_UTILS::add_scene_menu_items (Gtk::Menu_Helpers::MenuList& items, uint32_t n_scenes, sigc::slot<void, uint32_t> action, std::function<std::string (uint32_t)> label)
+{
+	using namespace Gtk::Menu_Helpers;
+
+	uint32_t const group = 32;
+
+	auto name = [&label] (uint32_t n) { return label ? label (n) : ARDOUR::cue_marker_name (n); };
+
+	if (n_scenes <= group) {
+		for (uint32_t n = 0; n < n_scenes; ++n) {
+			items.push_back (MenuElem (name (n), sigc::bind (action, n)));
+		}
+		return;
+	}
+
+	for (uint32_t first = 0; first < n_scenes; first += group) {
+		uint32_t const   end = std::min (n_scenes, first + group);
+		Gtk::Menu*       sub = Gtk::manage (new Gtk::Menu);
+		MenuList&        sitems (sub->items ());
+		sub->set_name ("ArdourContextMenu");
+		for (uint32_t n = first; n < end; ++n) {
+			sitems.push_back (MenuElem (name (n), sigc::bind (action, n)));
+		}
+		items.push_back (MenuElem (string_compose ("%1-%2", ARDOUR::cue_marker_name (first), ARDOUR::cue_marker_name (end - 1)), *sub));
+	}
+}
+
+void
 ARDOUR_UI_UTILS::format_position (ARDOUR::Session* s, Temporal::timepos_t const& p, char* buf, size_t bufsize, bool onoff)
 {
 	Temporal::BBT_Time bbt;

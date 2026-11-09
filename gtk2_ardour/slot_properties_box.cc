@@ -591,11 +591,11 @@ SlotPropertyTable::fill_jump_menus (uint32_t n_scenes)
 		MenuList& jitems (_jump_menu[which]->items ());
 		jitems.clear ();
 		jitems.push_back (MenuElem (_("Multi..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::edit_jump), which == 1)));
-		for (uint32_t i = 0; i < n_scenes; i++) {
-			FollowAction jump_fa = (FollowAction::JumpTrigger);
+		ARDOUR_UI_UTILS::add_scene_menu_items (jitems, n_scenes, [this, which] (uint32_t i) {
+			FollowAction jump_fa (FollowAction::JumpTrigger);
 			jump_fa.targets.set (i);
-			jitems.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &SlotPropertyTable::set_follow_action), jump_fa, which)));
-		}
+			set_follow_action (jump_fa, which);
+		});
 	}
 }
 

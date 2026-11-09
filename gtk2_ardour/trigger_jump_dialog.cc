@@ -16,6 +16,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <ytkmm/scrolledwindow.h>
 #include <ytkmm/stock.h>
 #include <ytkmm/table.h>
 
@@ -26,6 +27,7 @@
 #include "ardour/triggerbox.h"
 
 #include "trigger_jump_dialog.h"
+#include "ui_config.h"
 
 #include "pbd/i18n.h"
 
@@ -74,7 +76,16 @@ TriggerJumpDialog::on_trigger_set ()
 		++r;
 	}
 
-	get_vbox()->pack_start (_table, false, false, 4);
+	if (n_scenes > 16) {
+		/* Spite: scenes can number in the hundreds; show 16 rows and scroll */
+		Gtk::ScrolledWindow* sw = manage (new Gtk::ScrolledWindow);
+		sw->set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
+		sw->add (_table);
+		sw->set_size_request (-1, rintf (16 * 26 * std::max (1.f, UIConfiguration::instance ().get_ui_scale ()))); /* about 16 rows */
+		get_vbox()->pack_start (*sw, true, true, 4);
+	} else {
+		get_vbox()->pack_start (_table, false, false, 4);
+	}
 
 	Gtk::Label *label = manage (new Gtk::Label(_("Enabling multiple slots will result\n"
 	                                             "in an equal random probability of\n"

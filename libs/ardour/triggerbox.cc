@@ -167,11 +167,30 @@ FollowAction::FollowAction (std::string const & str)
 
 	type = FollowAction::Type (string_2_enum (str.substr (0, colon), type));
 
+	std::string const t (str.substr (colon + 1));
+
+	if (!t.empty () && t[0] == '@') {
+		/* Spite: the scenes, by index, when one is beyond the first 64 */
+		std::stringstream ss (t.substr (1));
+		std::string tok;
+		while (std::getline (ss, tok, ',')) {
+			char* end = 0;
+			unsigned long const n = strtoul (tok.c_str (), &end, 10);
+			if (end == tok.c_str ()) {
+				throw failed_constructor ();
+			}
+			if (n < targets.size ()) {
+				targets.set (n);
+			}
+		}
+		return;
+	}
+
 	/* We use the ulong representation of the bitset because the string
 	   version is absurd.
 	*/
-	unsigned long ul;
-	std::stringstream ss (str.substr (colon+1));
+	unsigned long long ul;
+	std::stringstream ss (t);
 	ss >> ul;
 	if (!ss) {
 		throw failed_constructor();
@@ -183,9 +202,20 @@ std::string
 FollowAction::to_string () const
 {
 	/* We use the ulong representation of the bitset because the string
-	   version is absurd.
+	   version is absurd. Spite: a bitset beyond the first 64 scenes doesn't
+	   fit, so then the scenes are listed by index ("@3,70,512").
 	*/
-	return string_compose ("%1:%2", enum_2_string (type), targets.to_ulong());
+	if ((targets >> 64).none ()) {
+		return string_compose ("%1:%2", enum_2_string (type), targets.to_ullong ());
+	}
+
+	std::string list;
+	for (size_t n = 0; n < targets.size (); ++n) {
+		if (targets.test (n)) {
+			list += string_compose ("%1%2", list.empty () ? "" : ",", n);
+		}
+	}
+	return string_compose ("%1:@%2", enum_2_string (type), list);
 }
 
 
@@ -270,6 +300,15 @@ Trigger::boxptr() const
 void
 Trigger::request_trigger_delete (Trigger* t)
 {
+	/* Spite: only the RT thread must not delete a trigger (it swaps them,
+	 * see TriggerBox::maybe_swap_pending ()); anywhere else, delete it now.
+	 * Queueing every one for the worker exhausts its request pool (1024)
+	 * when a session with many scenes on many tracks is closed, and hangs.
+	 */
+	if (!AudioEngine::instance ()->in_process_thread ()) {
+		delete t;
+		return;
+	}
 	TriggerBox::worker->request_delete_trigger (t);
 }
 
@@ -368,6 +407,7 @@ Trigger::set_ui_state (Trigger::UIState &state)
 	/* increment ui_state generation so vals will get loaded when the trigger stops */
 	unsigned int g = ui_state.generation.load();
 	while (!ui_state.generation.compare_exchange_strong (g, g+1));
+	_box.queue_property_update (); /* Spite */
 
 	/* tempo is currently outside the scope of ui_state */
 	if (state.tempo > 0) {
@@ -484,6 +524,7 @@ void
 Trigger::set_pending (Trigger* t)
 {
 	Trigger* old = _pending.exchange (t);
+	_box.queue_slot_swap_check (); /* Spite */
 	if (old && old != MagicClearPointerValue) {
 		/* new pending trigger set before existing pending trigger was used */
 		delete old;
@@ -509,6 +550,7 @@ Trigger::set_ ## name (type val) \
 { \
 	unsigned int g = ui_state.generation.load(); \
 	do { ui_state.name = val; } while (!ui_state.generation.compare_exchange_strong (g, g+1)); \
+	_box.queue_property_update (); /* Spite */ \
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("trigger %1 property& cas-set: %2 gen %3\n", index(), _ ## name.property_name(), ui_state.generation.load())); \
 	send_property_change (Properties::name); /* EMIT SIGNAL */ \
 	_box.session().set_dirty (); \
@@ -530,6 +572,7 @@ Trigger::set_ ## name (type const & val) \
 { \
 	unsigned int g = ui_state.generation.load(); \
 	do { ui_state.name = val; } while (!ui_state.generation.compare_exchange_strong (g, g+1)); \
+	_box.queue_property_update (); /* Spite */ \
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("trigger %1 property& cas-set: %2 gen %3\n", index(), _ ## name.property_name(), ui_state.generation.load())); \
 	send_property_change (Properties::name); /* EMIT SIGNAL */ \
 	_box.session().set_dirty (); \
@@ -569,6 +612,7 @@ Trigger::set_ ## name (type val) \
 	ui_state.name = val; \
 	unsigned int g = ui_state.generation.load(); \
 	do { ui_state.name = val; } while (!ui_state.generation.compare_exchange_strong (g, g+1)); \
+	_box.queue_property_update (); /* Spite */ \
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("trigger %1 property& cas-set: %2 gen %3\n", index(), _ ## name.property_name(), ui_state.generation.load())); \
 	send_property_change (Properties::name); /* EMIT SIGNAL */ \
 	_box.session().set_dirty (); \
@@ -588,6 +632,7 @@ Trigger::set_ ## name (type const & val) \
 	ui_state.name = val; \
 	unsigned int g = ui_state.generation.load(); \
 	do { ui_state.name = val; } while (!ui_state.generation.compare_exchange_strong (g, g+1)); \
+	_box.queue_property_update (); /* Spite */ \
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("trigger %1 property& cas-set: %2 gen %3\n", index(), _ ## name.property_name(), ui_state.generation.load())); \
 	send_property_change (Properties::name); /* EMIT SIGNAL */ \
 	_box.session().set_dirty (); \
@@ -628,6 +673,7 @@ Trigger::bang (float velocity)
 	}
 	_pending_velocity_gain = velocity;
 	_bang.fetch_add (1);
+	_box.queue_state_request_check (); /* Spite */
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("bang on %1\n", _index));
 }
 
@@ -638,6 +684,7 @@ Trigger::unbang ()
 		return;
 	}
 	_unbang.fetch_add (1);
+	_box.queue_state_request_check (); /* Spite */
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("un-bang on %1\n", _index));
 }
 
@@ -677,20 +724,20 @@ Trigger::shift_follow_targets (uint32_t at, int delta)
 		if (fa.targets.none ()) {
 			continue;
 		}
-		FollowAction::Targets moved;
-		for (size_t b = 0; b < moved.size (); ++b) {
-			if (!fa.targets.test (b)) {
-				continue;
-			}
-			if (b < at) {
-				moved.set (b);
-			} else if (delta > 0) {
-				if (b + delta < moved.size ()) {
-					moved.set (b + delta);
-				}
-			} else if (b > at) {
-				moved.set (b + delta);
-			} /* else: the removed slot itself */
+		/* word-wise: the slots below `at` stay; the ones from `at` move up
+		 * one (insert), or the ones above `at` move down one (remove, which
+		 * drops the removed slot itself). Shifting a bitset by its size or
+		 * more gives no bits.
+		 */
+		typedef FollowAction::Targets T;
+		size_t const n = T ().size ();
+		T const below = (at == 0) ? T () : (~T () >> (n - std::min<size_t> (at, n)));
+		T moved (fa.targets & below);
+		if (delta > 0) {
+			moved |= (fa.targets & ~below) << 1;
+		} else {
+			T const above = (at + 1 >= n) ? T () : (~T () << (at + 1));
+			moved |= (fa.targets & above) >> 1;
 		}
 		if (moved == fa.targets) {
 			continue;
@@ -821,6 +868,7 @@ Trigger::bounds_changed (Temporal::timepos_t const & start, Temporal::timepos_t 
 
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("%1/%2 pushed pending swap @ %3 for bounds change\n", _box.order(), index(), pending));
 	pending_swap.store (pending);
+	_box.queue_edit_swap_check (); /* Spite */
 
 	/* Clean up a previous RT midi buffer swap (if there is one) */
 
@@ -858,6 +906,7 @@ void
 Trigger::request_stop ()
 {
 	_requests.stop = true;
+	_box.queue_state_request_check (); /* Spite */
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("%1 asked to stop\n", name()));
 }
 
@@ -2657,6 +2706,7 @@ MIDITrigger::set_used_channels (Evoral::SMF::UsedChannels used)
 		while (!ui_state.generation.compare_exchange_strong (g, g+1));
 
 		ui_state.used_channels = used;
+		_box.queue_property_update (); /* Spite */
 
 		send_property_change (ARDOUR::Properties::used_channels);
 		_box.session().set_dirty();
@@ -2714,6 +2764,7 @@ MIDITrigger::set_patch_change (Evoral::PatchChange<MidiBuffer::TimeType> const &
 	/* increment ui_state generation so vals will get loaded when the trigger stops */
 	unsigned int g = ui_state.generation.load();
 	while (!ui_state.generation.compare_exchange_strong (g, g+1));
+	_box.queue_property_update (); /* Spite */
 
 	send_property_change (Properties::patch_change);
 }
@@ -3276,6 +3327,7 @@ MIDITrigger::model_contents_changed ()
 
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("%1/%2 pushed pending swap @ %3 for model contents change\n", _box.order(), index(), pending));
 	pending_swap.store (pending);
+	_box.queue_edit_swap_check (); /* Spite */
 
 	/* Clean up a previous RT midi buffer swap */
 
@@ -3771,6 +3823,8 @@ TriggerBox::TriggerBox (Session& s, DataType dt)
 	while (pending.size() < all_triggers.size()) {
 		pending.push_back (std::atomic<Trigger*>(0));
 	}
+
+	_possible_targets.reserve (max_triggers_per_box);
 
 	Config->ParameterChanged.connect_same_thread (*this, std::bind (&TriggerBox::parameter_changed, this, _1));
 	_session.config.ParameterChanged.connect_same_thread (*this, std::bind (&TriggerBox::parameter_changed, this, _1));
@@ -4491,6 +4545,7 @@ TriggerBox::maybe_swap_pending (uint32_t slot)
 			 */
 			p->set_index (slot);
 			all_triggers[slot].reset (p, Trigger::request_trigger_delete);
+			queue_property_update (); /* Spite: the new trigger's UI state, see run_cycle () */
 			TriggerSwapped (slot); /* EMIT SIGNAL */
 		}
 	}
@@ -4869,6 +4924,15 @@ TriggerBox::add_trigger (TriggerPtr trigger)
  * all_triggers without a lock), see Session::insert_scene ().
  */
 
+void
+TriggerBox::queue_all_slot_checks ()
+{
+	_edit_swaps_queued.store (true);
+	_state_requests_queued.store (true);
+	_slot_swaps_queued.store (true);
+	_property_updates_queued.store (true);
+}
+
 uint32_t
 TriggerBox::n_triggers () const
 {
@@ -4913,6 +4977,7 @@ TriggerBox::insert_slot (uint32_t at)
 		++_active_scene;
 	}
 	pending.push_back (0);
+	queue_all_slot_checks (); /* the slots moved */
 }
 
 bool
@@ -4962,6 +5027,7 @@ TriggerBox::remove_slot (uint32_t at)
 	if (!pending.empty ()) {
 		pending.pop_back ();
 	}
+	queue_all_slot_checks (); /* the slots moved */
 }
 
 void
@@ -5379,8 +5445,11 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 		}
 	}
 
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		all_triggers[n]->check_edit_swap (timepos_t (start_sample), _currently_playing == all_triggers[n], bufs);
+	/* Spite: only when a slot has posted an edit (queue_edit_swap_check ()) */
+	if (_edit_swaps_queued.exchange (false)) {
+		for (uint64_t n = 0; n < all_triggers.size(); ++n) {
+			all_triggers[n]->check_edit_swap (timepos_t (start_sample), _currently_playing == all_triggers[n], bufs);
+		}
 	}
 
 	/* handle any incoming requests from the GUI or other
@@ -5394,8 +5463,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 
 	std::vector<uint32_t> to_run;
 
-	for (auto & trig : all_triggers) {
-		trig->process_state_requests (bufs, nframes - 1);
+	/* Spite: only when a slot was banged, unbanged or asked to stop
+	 * (queue_state_request_check ()); after the cue handling above, which
+	 * may bang a slot in this very cycle
+	 */
+	if (_state_requests_queued.exchange (false)) {
+		for (auto & trig : all_triggers) {
+			trig->process_state_requests (bufs, nframes - 1);
+		}
 	}
 
 	/* cue handling is over at this point, reset _active_scene to reflect this */
@@ -5406,9 +5481,16 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 		_currently_playing = 0;
 	}
 
-	for (uint32_t n = 0; n < all_triggers.size(); ++n) {
-		if (all_triggers[n] != _currently_playing) {
-			maybe_swap_pending (n);
+	/* Spite: only when a slot has a new trigger waiting (queue_slot_swap_check ()).
+	 * The playing slot's waits until it stops: look again next cycle.
+	 */
+	if (_slot_swaps_queued.exchange (false)) {
+		for (uint32_t n = 0; n < all_triggers.size(); ++n) {
+			if (all_triggers[n] != _currently_playing) {
+				maybe_swap_pending (n);
+			} else if (all_triggers[n]->has_pending ()) {
+				_slot_swaps_queued.store (true);
+			}
 		}
 	}
 
@@ -5453,11 +5535,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 		_stop_all = false;
 
 		/* nobody is active, but we should catch up on changes
-		 * requested by the UI
+		 * requested by the UI (Spite: when there are any, see
+		 * queue_property_update ())
 		 */
 
-		for (auto & trig : all_triggers) {
-			trig->update_properties();
+		if (_property_updates_queued.exchange (false)) {
+			for (auto & trig : all_triggers) {
+				trig->update_properties();
+			}
 		}
 
 		return;
@@ -5467,9 +5552,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 	 * requested by the UI
 	 */
 
-	for (auto & trig : all_triggers) {
-		if (trig != _currently_playing) {
-			trig->update_properties();
+	if (_property_updates_queued.exchange (false)) {
+		for (auto & trig : all_triggers) {
+			if (trig != _currently_playing) {
+				trig->update_properties();
+			} else if (trig->ui_state_pending ()) {
+				/* Spite: applied when it retriggers, or caught up once it stops */
+				_property_updates_queued.store (true);
+			}
 		}
 	}
 
@@ -5701,9 +5791,9 @@ TriggerBox::determine_next_trigger (uint32_t current)
 {
 	uint32_t n;
 	uint32_t runnable = 0;
-	std::vector<int32_t> possible_targets;
+	std::vector<int32_t>& possible_targets (_possible_targets); /* Spite: reserved in the constructor */
 
-	possible_targets.reserve (TriggerBox::max_triggers_per_box);
+	possible_targets.clear ();
 
 	/* count number of triggers that can actually be run (i.e. they have a region) */
 
@@ -5911,6 +6001,7 @@ TriggerBox::set_state (const XMLNode& node, int version)
 	 * ever dropped.
 	 */
 	add_slots_to (_session.scene_count ());
+	queue_all_slot_checks (); /* new slots: look at all of them once */
 
 	return 0;
 }
