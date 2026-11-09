@@ -901,8 +901,14 @@ def spite_tab(b, xy, rect, face, conv):
                color(b.get('textoncolor') or b.get('activetextoncolor'), '#ffffff'),
                init, 1 if init_on else 0, n, ' '.join(pd_symbol(i) for i in items),
                (' ' + ' '.join(pics + ['-'] * (n - len(pics)))) if pics else ''))
-    return Tr(PdObj(line, (xy[0], xy[1], w, h), 1, 2, (int(face[0]), int(face[1])) if face else None),
-              outmap={0: (0, 0), 1: (0, 1)}, inmap={0: (0, 0)})
+    tab = PdObj(line, (xy[0], xy[1], w, h), 1, 2, (int(face[0]), int(face[1])) if face else None)
+    if 1 in b.get('_used', ()) and all(item_msg(i) == str(i) for i in items):
+        # Max sends a numeric item as a number (Flechtwerk's models 1..16 go to [- 1]);
+        # spite.tab sends every item as a symbol: [fromsymbol] makes it a number again
+        fs_obj = PdObj('#X obj %d %d cyclone/fromsymbol;' % (xy[0] + w + 6, xy[1] + h - 20),
+                       text_bounds(xy[0] + w + 6, xy[1] + h - 20, 'cyclone/fromsymbol'), 1, 1)
+        return Tr([tab, fs_obj], outmap={0: (0, 0), 1: (1, 0)}, inmap={0: (0, 0)}, conns=[(0, 1, 1, 0)])
+    return Tr(tab, outmap={0: (0, 0), 1: (0, 1)}, inmap={0: (0, 0)})
 
 
 def tab(b, xy, rect, face, conv):
