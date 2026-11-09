@@ -280,6 +280,65 @@ def gswitch_sub(xy, n):
     return subpatch(xy, 'gswitch', objs, conns)
 
 
+def midiparse_sub(xy):
+    """[midiparse] with Max's 8th outlet: each complete MIDI message as 'midievent <bytes>' (what
+    feeds a poly~), sent first, as Max sends right to left. cyclone's [midiparse] gives the other
+    seven; the bytes since the last status byte are kept, and its channel outlet (which fires
+    first, once a message is complete) sends them."""
+    objs = ['#X obj 20 20 inlet;', '#X obj 20 50 t f f;', '#X obj 20 330 midiparse;']
+    objs += ['#X obj %d 400 outlet;' % (20 + 50 * k) for k in range(8)]          # 3..10
+    objs += ['#X obj 230 80 moses 128;',                                         # 11 data | status
+             '#X obj 230 150 list prepend;',                                     # 12 the bytes so far
+             '#X obj 230 180 t a a;',                                            # 13
+             '#X obj 370 300 list append;',                                      # 14 a copy, to send
+             '#X obj 330 110 moses 240;',                                        # 15 channel status
+             '#X obj 330 140 t f f;',                                            # 16
+             '#X obj 440 220 f;',                                                # 17 the status byte
+             '#X obj 320 260 t f b;',                                            # 18 message complete
+             '#X obj 370 330 list prepend midievent;',                           # 19
+             '#X obj 370 360 list trim;',                                        # 20
+             '#X obj 380 260 t b b;',                                            # 21
+             '#X obj 430 140 moses 248;',                                        # 22 system common
+             '#X obj 430 170 t b;']                                              # 23 clears
+    conns = [(0, 0, 1, 0), (1, 0, 2, 0), (1, 1, 11, 0)]
+    conns += [(2, k, 3 + k, 0) for k in range(6)]
+    conns += [(11, 0, 12, 0), (12, 0, 13, 0), (13, 1, 12, 1), (13, 0, 14, 1),
+              (11, 1, 15, 0), (15, 0, 16, 0), (16, 1, 17, 1), (16, 0, 13, 0),
+              (15, 1, 22, 0), (22, 0, 23, 0), (23, 0, 13, 0),
+              (2, 6, 18, 0), (18, 1, 21, 0), (21, 1, 14, 0), (21, 0, 17, 0), (17, 0, 13, 0),
+              (14, 0, 19, 0), (19, 0, 20, 0), (20, 0, 10, 0), (18, 0, 9, 0)]
+    return subpatch(xy, 'midiparse', objs, conns)
+
+
+def select_sub(xy, values):
+    """Max's [sel a b c] has an inlet per value, to change it; Pd's has one inlet: a chain of
+    one-value [sel]s, each settable from its right inlet, matching in the same order"""
+    n = len(values)
+    objs = ['#X obj %d 20 inlet;' % (20 + 70 * k) for k in range(n + 1)]
+    objs += ['#X obj %d %d sel %s;' % (20 + 70 * k, 70 + 30 * k, pd_escape(v)) for k, v in enumerate(values)]
+    objs += ['#X obj %d %d outlet;' % (20 + 70 * k, 120 + 30 * n) for k in range(n + 1)]
+    sel, out = n + 1, 2 * n + 1
+    conns = [(0, 0, sel, 0)]
+    for k in range(n):
+        conns += [(1 + k, 0, sel + k, 1), (sel + k, 0, out + k, 0),
+                  (sel + k, 1, sel + k + 1 if k + 1 < n else out + n, 0)]
+    return subpatch(xy, 'sel', objs, conns)
+
+
+def thisdevice_sub(xy):
+    """[live.thisdevice]: a bang when the device is ready; 1 from the middle outlet, the device
+    being on (a plugin here is always on)"""
+    objs = ['#X obj 20 20 loadbang;', '#X obj 20 50 t b b;', '#X msg 100 80 1;',
+            '#X obj 20 120 outlet;', '#X obj 100 120 outlet;', '#X obj 180 120 outlet;']
+    return subpatch(xy, 'live.thisdevice', objs, [(0, 0, 1, 0), (1, 1, 2, 0), (2, 0, 4, 0), (1, 0, 3, 0)])
+
+
+def inert_sub(xy, name, n_out):
+    """a Max object that only sets the look (live.colors): its cords stay, nothing goes through"""
+    objs = ['#X obj 20 20 inlet;'] + ['#X obj %d 80 outlet;' % (20 + 50 * k) for k in range(n_out)]
+    return subpatch(xy, name, objs, [])
+
+
 def gain_sub(xy, box):
     """[live.gain~] / [gain~]: signal in, scaled by a dB slider, out; then the value"""
     types = box.get('outlettype') or ['signal', 'signal', '']
@@ -354,8 +413,9 @@ def param_info(box):
     v = box.get('saved_attribute_attributes', {}).get('valueof', {})
     lo = num(v.get('parameter_mmin', 0))
     hi = num(v.get('parameter_mmax', 127 if box.get('maxclass') != 'live.toggle' else 1))
-    init = v.get('parameter_initial', [lo])
-    init = num(init[0] if isinstance(init, list) and init else init, lo)
+    zero = min(max(0, lo), hi)  # with no initial value, Live starts a parameter at 0, in its range
+    init = v.get('parameter_initial', [zero])
+    init = num(init[0] if isinstance(init, list) and init else init, zero)
     name = v.get('parameter_longname') or box.get('varname') or ''
     return lo, hi, init, name
 
@@ -409,12 +469,15 @@ def presented(b):
     return None
 
 
-def face_size(p):
-    """device width x height: devicewidth, else the presentation's extent"""
+def face_size(p, device=True):
+    """device width x height: devicewidth, else the presentation's extent. A subpatcher's
+    presentation is as big as its window."""
     rects = [presented(b['box']) for b in p.get('boxes', [])]
     rects = [r for r in rects if r]
     if not rects:
         return None
+    if not device and p.get('rect'):
+        return int(round(p['rect'][2])), int(round(p['rect'][3]))
     w = num(p.get('devicewidth', 0))
     if not w:
         w = max(r[0] + r[2] for r in rects)
@@ -424,11 +487,62 @@ def face_size(p):
 
 class PdObj:
     """one top-level Pd object (a subpatch spans several lines)"""
-    def __init__(self, lines, bounds=None, nin=1, nout=1, pres=None):
+    def __init__(self, lines, bounds=None, nin=1, nout=1, pres=None, kind=None):
         self.lines = lines if isinstance(lines, list) else [lines]
         self.bounds = bounds    # (x, y, w, h): plugdata's getPdBounds (), estimated, for tidy cords
         self.nin, self.nout = nin, nout
         self.pres = pres        # (x, y) on the face, or None
+        self.kind = kind        # 'obj', 'msg' or 'text': a text box that takes the Max box's width
+
+    def _pos_line(self):
+        """the index of the line that holds the object's position"""
+        return len(self.lines) - 1 if self.lines[-1].startswith('#X restore') else 0
+
+    def move(self, dx, dy):
+        if not (dx or dy):
+            return
+        i = self._pos_line()
+        m = re.match(r'(#X \S+ )(-?\d+) (-?\d+)(.*)$', self.lines[i], re.S)
+        if m:
+            self.lines[i] = '%s%d %d%s' % (m.group(1), int(m.group(2)) + dx, int(m.group(3)) + dy, m.group(4))
+        if self.bounds:
+            x, y, w, h = self.bounds
+            self.bounds = (x + dx, y + dy, w, h)
+
+    def text(self):
+        """what plugdata shows in the box"""
+        i = self._pos_line()
+        m = re.match(r'#X (?:obj|msg|text|restore) -?\d+ -?\d+ ?(.*);$', self.lines[i], re.S)
+        return re.sub(r'\\(.)', r'\1', m.group(1)) if m else ''
+
+    def set_width(self, target):
+        """make a text box about target px wide with Pd's ', f <chars>' width, the way plugdata
+        sizes it (TextObject, MessageObject, CommentObject::getTextSize). An object or message
+        never gets narrower than its text, which plugdata would wrap; a comment wraps, as in Max."""
+        text = self.text()
+        ideal = int(round(inter_width(text))) + 13
+        fw = 7  # glist_fontwidth () at the patch's font size, 12
+        io_min = 18 * max(self.nin, self.nout, 1) if self.kind == 'obj' else 0
+        if self.kind == 'msg':
+            base, off = 0, ideal % fw
+        elif self.kind == 'text':
+            base, off = 0, 0
+        else:
+            base, off = 5, (ideal - 5) % fw
+        chars = max(2 if self.kind == 'msg' else 1, int(round((target - base - off) / float(fw))))
+        width = max(chars * fw + off + base, io_min)
+        x, y, w, h = self.bounds
+        if self.kind != 'text' and width < max(ideal, io_min) - 1:
+            width = max(ideal, io_min)
+        else:
+            i = self._pos_line()
+            self.lines[i] = self.lines[i][:-1] + ', f %d;' % chars
+            if self.kind == 'text':
+                h = 16 * len(wrap_like_pd(text, chars)) + 4
+            if self.lines[i].startswith('#X restore'):
+                width = max(ideal, io_min)  # plugdata draws a subpatch box at its text's width for now
+        self.bounds = (x, y, width, h)
+        return width
 
 
 class Tr:
@@ -441,9 +555,41 @@ class Tr:
         self.nout = nout        # with outmap None: outlets of objs[0]; cords from beyond are dropped
 
 
-def text_bounds(x, y, text, nin=1, nout=1, h=20):
-    """plugdata's size of a text object: Inter at 15 px, about 7 px a character"""
-    w = max(min(int(7 * len(text)) + 13, 420), 18 * max(nin, nout, 1), 7)
+# plugdata draws box text in Inter at JUCE height 15 (ascent + descent): advance widths of
+# ' '..'~' in font units, 15 / (1984 + 494) px each
+INTER = [576, 589, 954, 1297, 1314, 2011, 1319, 614, 747, 747, 1026, 1355, 590, 942, 590, 738, 1292, 833,
+         1249, 1265, 1323, 1245, 1270, 1159, 1267, 1270, 590, 618, 1355, 1355, 1355, 1047, 1978, 1413, 1340,
+         1496, 1478, 1231, 1209, 1528, 1522, 550, 1169, 1376, 1158, 1850, 1543, 1566, 1308, 1566, 1318, 1314,
+         1322, 1524, 1413, 2018, 1397, 1390, 1288, 747, 738, 747, 965, 934, 661, 1150, 1254, 1170, 1254, 1194,
+         758, 1256, 1211, 496, 496, 1124, 496, 1794, 1210, 1228, 1254, 1254, 771, 1081, 670, 1211, 1151, 1676,
+         1118, 1151, 1131, 873, 681, 873, 1355]
+TEXT_H = 21  # a one-line text box in plugdata: max (text height + 5, 20)
+
+
+def inter_width(text, height=15.0):
+    return sum(INTER[ord(c) - 32] if 32 <= ord(c) < 127 else 1150 for c in text) * height / 2478.0
+
+
+def wrap_like_pd(text, chars):
+    """CommentObject::wrapTextLikePd: words onto lines of at most chars characters"""
+    lines, cur = [], ''
+    for word in text.split(' '):
+        cand = (cur + ' ' + word) if cur else word
+        if len(cand) <= chars:
+            cur = cand
+            continue
+        if cur:
+            lines.append(cur)
+        while len(word) > chars:
+            lines.append(word[:chars])
+            word = word[chars:]
+        cur = word
+    return lines + [cur] if cur or not lines else lines
+
+
+def text_bounds(x, y, text, nin=1, nout=1, h=TEXT_H):
+    """plugdata's size of a text object with automatic width"""
+    w = max(min(int(round(inter_width(re.sub(r'\\(.)', r'\1', text)))) + 13, 420), 18 * max(nin, nout, 1), 7)
     return (x, y, w, h)
 
 
@@ -482,15 +628,16 @@ def simplify(pts):
     return out
 
 
-def cord_path(midpoints, src_rect, dst_rect, o, i, dy=0):
+def cord_path(midpoints, src_rect, dst_rect, o, i, place=None):
     """Max's corners (a flat x, y list) -> plugdata's path symbol: JUCE base64 of int32 x, y pairs
     relative to the outlet centre o, from the outlet to the inlet i. None when the cord is not a
-    tidy one, so plugdata draws its usual curve."""
+    tidy one, so plugdata draws its usual curve. src_rect, dst_rect: the boxes as laid out here;
+    place: Max point -> point here."""
     if not midpoints or len(midpoints) % 2:
         return None
-    mids = [(int(x), int(y) + dy) for x, y in zip(midpoints[0::2], midpoints[1::2])]
-    o_max = (mids[0][0], int(src_rect[1] + src_rect[3]) + dy)
-    i_max = (mids[-1][0], int(dst_rect[1]) + dy)
+    mids = [tuple(place((x, y)) if place else (int(x), int(y))) for x, y in zip(midpoints[0::2], midpoints[1::2])]
+    o_max = (mids[0][0], int(src_rect[1] + src_rect[3]))
+    i_max = (mids[-1][0], int(dst_rect[1]))
     pts = simplify([o_max] + mids + [i_max])
     if len(pts) < 4:
         return None
@@ -524,13 +671,23 @@ def dial(b, xy, rect, face):
     num_h = 11 if shownumber else 0
     size = max(10, int(min(w, h - name_h - num_h)))
     kx, ky = int((w - size) / 2), name_h
-    exp = num(v.get('parameter_exponent', 1))
-    start = 0 if lo < 0 < hi else lo
+    exp = num(v.get('parameter_exponent', 1)) or 1
     steps = int(num(v.get('parameter_steps', 0)))
+    used = b.get('_used', {0})
+    # Max's right outlet sends the dial's position, 0-1. When only that one is wired and the
+    # value isn't shown, the knob itself runs 0-1 (no box to add); otherwise a box computes it
+    unit = 1 in used and 0 not in used and not shownumber
+    if unit:
+        span = (hi - lo) or 1
+        init = round(max(0.0, min(1.0, (init - lo) / float(span))) ** (1.0 / exp), 6)
+        if v.get('parameter_type') == 1 and not steps:
+            steps = int(abs(hi - lo)) + 1
+        lo, hi, exp = 0, 1, 1
     fg = color(b.get('activeneedlecolor') or b.get('activedialcolor'), LIVE['arc'])
+    # live.dial's arc always starts at its minimum, bipolar range or not
     knob = ('else/knob %d %s %s %s %s empty empty %s %s %s 0 0 %d %d 1 300 0 0 %s empty empty %d 11 %d %d 0 %d 0 0 0 1'
             % (size, lo, hi, 0 if exp == 1 else exp, init, LIVE['bg'], LIVE['track'], fg, steps,
-               1 if v.get('parameter_type') == 1 else 0, start, 1 if shownumber else 0,
+               1 if v.get('parameter_type') == 1 else 0, lo, 1 if shownumber else 0,
                int(size / 2) - 12, size + 1, 1 if init_on else 0))
     x, y = xy
     objs = [PdObj('#X obj %d %d %s;' % (x + kx, y + ky, knob), (x + kx, y + ky, size + 1, size + 1),
@@ -539,15 +696,25 @@ def dial(b, xy, rect, face):
         name = v.get('parameter_shortname') or v.get('parameter_longname') or ''
         objs.append(note(name, (x, y), int(w), color(b.get('textcolor'), LIVE['text']), 1,
                          (int(face[0]), int(face[1])) if face else None))
-    objs.append(normalized(lo, hi, exp, (x, y + ky + size + 14)))
+    if unit:
+        return Tr(objs, outmap={1: (0, 0)}, inmap={0: (0, 0)})
+    if 1 not in used:
+        return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
+    objs.append(normalized(lo, hi, exp, (x, y + ky + size + 8)))
     return Tr(objs, outmap={0: (0, 0), 1: (len(objs) - 1, 0)}, inmap={0: (0, 0)}, conns=[(0, 0, len(objs) - 1, 0)])
 
 
 def normalized(lo, hi, exp, xy):
-    """Max's live.dial / live.numbox / live.slider send their value normalized to 0-1 from the
-    right outlet: an [expr] after the Pd object gives that outlet"""
+    """Max's live.dial / live.numbox / live.slider send their position, 0-1, from the right
+    outlet: the smallest box that computes it from the value (the Pd object clips its value)"""
     span = (hi - lo) or 1
-    e = 'expr pow(max(min(($f1 - %s) / %s \\, 1) \\, 0) \\, %s)' % (lo, span, 1.0 / exp if exp else 1)
+    if exp != 1:
+        e = 'expr pow(($f1 - %s) / %s \\, %g)' % (lo, span, 1.0 / exp)
+    elif lo == 0:
+        e = '/ %s' % span
+    else:
+        e = 'expr ($f1 - %s) / %s' % (lo, span)
+    e = e.replace('- -', '+ ')
     return PdObj('#X obj %d %d %s;' % (xy[0], xy[1], e.replace('$', '\\$')), text_bounds(xy[0], xy[1], e, 1, 1), 1, 1)
 
 
@@ -556,7 +723,8 @@ def note(text, xy, w, col, just, pres, size=11):
     r, g, b = (int(col[i:i + 2], 16) for i in (1, 3, 5))
     words = ' '.join(pd_symbol(t) for t in str(text).split()) or '-'
     return PdObj('#X obj %d %d note %d %d Inter empty 0 %d %d %d 0 0 0 0 0 %d %s;'
-                 % (xy[0], xy[1], max(w, 8), size, r, g, b, just, words), None, 1, 0, pres)
+                 % (xy[0], xy[1], max(w, 8), size, r, g, b, just, words),
+                 (xy[0], xy[1], max(w, 8), int(size * 1.4) + 2), 1, 0, pres)
 
 
 def numbox(b, xy, rect, face):
@@ -565,16 +733,24 @@ def numbox(b, xy, rect, face):
     v, init_on = param_flags(b)
     w, h = rect[2], rect[3]
     unit = UNITS.get(int(num(v.get('parameter_unitstyle', 1))), '')
-    digits = max(3, int((w - (6 * len(unit) + 4 if unit else 0)) / 6))
+    # Live's small numbers: plugdata draws nbx text fs + 3 px high and the box
+    # fs * 31 / 36 px a digit + height / 2 + 5 wide (NumberObject::calcFontWidth): as many
+    # digits as fit Max's width, the unit (as the label) inside the box's right end
+    fs = max(6, int(round(num(b.get('fontsize', 9)))) - 2)
+    hh = max(8, int(round(h)) - 1)
+    unit_w = int(round(inter_width(unit, fs + 3))) + 3 if unit else 0
+    digits = max(1, int(round((w - unit_w - 5 - hh // 2) * 36.0 / (fs * 31))))
     fg = color(b.get('textcolor') or b.get('activeslidercolor'), LIVE['value'])
-    lines = ('#X obj %d %d nbx %d %d %s %s 0 %d empty empty %s %d %d 0 10 %s %s %s %s 256;'
-             % (xy[0], xy[1], digits, max(8, int(h) - 1), lo, hi, 1 if init_on else 0,
-                pd_symbol(unit) if unit else 'empty', digits * 6 + int(h / 2) + 2, int(h / 2),
+    lines = ('#X obj %d %d nbx %d %d %s %s 0 %d empty empty %s %d %d 0 %d %s %s %s %s 256;'
+             % (xy[0], xy[1], digits, hh, lo, hi, 1 if init_on else 0,
+                pd_symbol(unit) if unit else 'empty', int(w) - unit_w + 1, int(h / 2), fs,
                 LIVE['bg'], fg, fg, init))
     exp = num(v.get('parameter_exponent', 1)) or 1
-    return Tr([PdObj(lines, (xy[0], xy[1], int(w), int(h)), 1, 1, (int(face[0]), int(face[1])) if face else None),
-               normalized(lo, hi, exp, (xy[0], xy[1] + int(h) + 14))],
-              outmap={0: (0, 0), 1: (1, 0)}, inmap={0: (0, 0)}, conns=[(0, 0, 1, 0)])
+    objs = [PdObj(lines, (xy[0], xy[1], int(w), int(h)), 1, 1, (int(face[0]), int(face[1])) if face else None)]
+    if 1 not in b.get('_used', {0}):
+        return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
+    objs.append(normalized(lo, hi, exp, (xy[0], xy[1] + int(h) + 8)))
+    return Tr(objs, outmap={0: (0, 0), 1: (1, 0)}, inmap={0: (0, 0)}, conns=[(0, 0, 1, 0)])
 
 
 def popmenu(b, xy, rect, face):
@@ -584,18 +760,22 @@ def popmenu(b, xy, rect, face):
     init = int(num((v.get('parameter_initial') or [0])[0] if isinstance(v.get('parameter_initial'), list) else v.get('parameter_initial', 0)))
     w, h = int(rect[2]), int(rect[3])
     fg = color(b.get('lcdcolor') or b.get('textcolor'), LIVE['value'])
-    menu = ('#X obj %d %d popmenu %d %d 10 %s %s empty empty empty empty empty 0 0 %d %d 0 1 0 0 0 0 0 %s;'
-            % (xy[0], xy[1], max(w, 20), max(h, 12), LIVE['bg'], fg, init, 1 if init_on else 0,
+    # ELSE's popmenu text is 1.5 x its font size in px: Live's 9.5 pt menu text is about font 7
+    fs = max(6, int(round(num(b.get('fontsize', 9.5)) * 0.75)))
+    menu = ('#X obj %d %d popmenu %d %d %d %s %s empty empty empty empty empty 0 0 %d %d 0 1 0 0 0 0 0 %s;'
+            % (xy[0], xy[1], max(w, 20), max(h, 12), fs, LIVE['bg'], fg, init, 1 if init_on else 0,
                ' '.join(pd_symbol(i) for i in items)))
     objs = [PdObj(menu, (xy[0], xy[1], w, h), 1, 1, (int(face[0]), int(face[1])) if face else None)]
+    if 1 not in b.get('_used', {0}):
+        return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
     sel = ['#X obj 20 20 inlet;', '#X obj 20 50 sel %s;' % ' '.join(str(k) for k in range(len(items))),
            '#X obj 20 200 outlet;']
     conns = [(0, 0, 1, 0)]
     for k, it in enumerate(items):
         sel.append('#X msg %d 100 %s;' % (20 + 80 * k, item_msg(it)))
         conns += [(1, k, 3 + k, 0), (3 + k, 0, 2, 0)]
-    objs.append(PdObj(subpatch('%d %d' % (xy[0], xy[1] + h + 12), 'menu-item', sel, conns),
-                      text_bounds(xy[0], xy[1] + h + 12, 'pd menu-item'), 1, 1))
+    objs.append(PdObj(subpatch('%d %d' % (xy[0], xy[1] + h + 8), 'menu-item', sel, conns),
+                      text_bounds(xy[0], xy[1] + h + 8, 'pd menu-item'), 1, 1))
     return Tr(objs, outmap={0: (0, 0), 1: (1, 0)}, inmap={0: (0, 0)}, conns=[(0, 0, 1, 0)])
 
 
@@ -678,6 +858,21 @@ def tab(b, xy, rect, face, conv):
     return Tr(objs, outmap={0: (logic, 0), 1: (logic, 1)}, inmap={0: (logic, 0)})
 
 
+def scope(b, xy, rect, face):
+    """scope~ -> ELSE's [scope~]: Max's size, colours, calccount (samples a point), bufsize
+    (points), range, trigger mode and level"""
+    def rgb(c, default):
+        h = color(c, default)
+        return ' '.join(str(int(h[i:i + 2], 16)) for i in (1, 3, 5))
+    w, h = max(int(rect[2]), 20), max(int(rect[3]), 20)
+    lo, hi = (b.get('range') or [-1.0, 1.0])[:2]
+    line = ('#X obj %d %d scope~ %d %d %d 3 %d %s %s %s 0 %d %s %s %s %s 0 empty;'
+            % (xy[0], xy[1], w, h, int(num(b.get('calccount', 2))) or 2, min(max(int(num(b.get('bufsize', 128))), 8), 256),
+               num(lo), num(hi), num(b.get('delay', 0)), int(num(b.get('trigger', 0))), num(b.get('triglevel', 0)),
+               rgb(b.get('fgcolor'), '#5a5a5a'), rgb(b.get('bgcolor'), '#cccccc'), rgb(b.get('gridcolor'), '#404040')))
+    return Tr(PdObj(line, (xy[0], xy[1], w, h), 2, 0, (int(face[0]), int(face[1])) if face else None), nout=0)
+
+
 def panel(b, xy, rect, face):
     w, h = max(int(rect[2]), 1), max(int(rect[3]), 1)
     bg = color(b.get('bgfillcolor') or b.get('bgcolor'), '#2e2e2e')
@@ -686,7 +881,7 @@ def panel(b, xy, rect, face):
 
 
 def comment(b, xy, rect, face):
-    size = int(round(num(b.get('fontsize', 10)) * 1.2))
+    size = max(8, int(round(num(b.get('fontsize', 10)))))  # [note]'s size is its font height in px
     col = color(b.get('textcolor'), LIVE['text'])
     return Tr(note(b.get('text', ''), xy, int(rect[2]), col, int(num(b.get('textjustification', 0))),
                    (int(face[0]), int(face[1])) if face else None, size), nout=0)
@@ -704,16 +899,19 @@ def line(b, xy, rect, face):
 
 def flechtwerk_voice(xy):
     """the voice of trnr.Flechtwerk (poly~ with one voice): the same messages and receives as the
-    compiled trnr.core.flechtwerk~, scaled for [plaits~]. MIDI comes straight from [notein]."""
+    compiled trnr.core.flechtwerk~, scaled for [plaits~]. MIDI comes in as the poly~'s
+    'midievent' messages, from the device's [midiparse], as in Max."""
     o = []
     c = []
     def obj(line):
         o.append(line)
         return len(o) - 1
     inl = obj('#X obj 20 20 inlet;')
-    ni = obj('#X obj 20 60 notein;')
-    sn = obj('#X obj 20 90 stripnote;')
-    tf = obj('#X obj 20 120 t b f;')
+    rm = obj('#X obj 20 45 route midievent;')
+    it = obj('#X obj 20 70 iter;')
+    ni = obj('#X obj 20 95 midiparse;')
+    sn = obj('#X obj 20 120 stripnote;')
+    tf = obj('#X obj 20 145 t b f;')
     pitch = obj('#X obj 60 160 sig~;')
     freq = obj('#X obj 140 160 r~ \\$0-freq;')
     add = obj('#X obj 60 200 +~;')
@@ -724,7 +922,7 @@ def flechtwerk_voice(xy):
     m2 = obj('#X obj 160 360 *~ 0;')
     o1 = obj('#X obj 60 400 outlet~;')
     o2 = obj('#X obj 160 400 outlet~;')
-    c += [(ni, 0, sn, 0), (ni, 1, sn, 1), (sn, 0, tf, 0), (sn, 1, vel, 0), (tf, 1, pitch, 0), (tf, 0, clk, 0),
+    c += [(inl, 0, rm, 0), (rm, 0, it, 0), (it, 0, ni, 0), (ni, 0, sn, 0), (sn, 0, tf, 0), (sn, 1, vel, 0), (tf, 1, pitch, 0), (tf, 0, clk, 0),
           (pitch, 0, add, 0), (freq, 0, add, 1), (add, 0, pl, 0), (clk, 0, pl, 1),
           (vel, 0, m1, 1), (vel, 0, m2, 1), (pl, 0, m1, 0), (pl, 1, m2, 0), (m1, 0, o1, 0), (m2, 0, o2, 0)]
     rc = obj('#X obj 300 20 r \\$0-ctrl;')
@@ -842,7 +1040,8 @@ class Converter:
                 pl['_drop'] = True
 
     def window_targets(self, boxes, lines):
-        """[pcontrol] opens the subpatchers its outlet is wired to: name those canvases, drop the cords"""
+        """[pcontrol] opens the subpatchers its outlet is wired to: name those canvases. The cord
+        stays, as in Max; nothing goes through it."""
         cls = {b['id']: ((b.get('text') or '').split(' ') or [''])[0] for b in boxes}
         for l in lines:
             pl = l.get('patchline', l)
@@ -856,12 +1055,24 @@ class Converter:
                         for s in boxes:
                             if s['id'] == src:
                                 s.setdefault('_opens', []).append(b['_canvas'])
-                pl['_drop'] = True
 
-    def patcher(self, p, face=False, gop=None):
+    def patcher(self, p, face=False, gop=None, device=False, names=()):
         """-> Pd record lines for the boxes and cords of one patcher. face: also write its
-        presentation layout (the device itself, or a bpatcher); gop: (w, h, x margin, y margin)."""
+        presentation layout (the device, a bpatcher, a subpatcher with a presentation); gop:
+        (w, h, x margin, y margin) of a bpatcher; device: the device's own patcher; names: names
+        this canvas answers to ([namecanvas]), for [pcontrol]."""
         boxes = [b['box'] for b in p.get('boxes', [])]
+        byid = {b['id']: b for b in boxes}
+        for l in p.get('lines', []):
+            pl = l.get('patchline', l)
+            if pl['source'][0] in byid:
+                byid[pl['source'][0]].setdefault('_used', set()).add(pl['source'][1])
+            if pl['destination'][0] in byid:
+                byid[pl['destination'][0]].setdefault('_fed', set()).add(pl['destination'][1])
+            dst = byid.get(pl['destination'][0])
+            src = byid.get(pl['source'][0])
+            if dst and src and dst.get('maxclass') == 'scope~' and src.get('maxclass') == 'message':
+                src['text'] = re.sub(r'(^|,\s*)(?:presentation_size|patching_size)\b', r'\1dim', src.get('text', ''))
         self.delay_lines(boxes, p.get('lines', []))
         self.window_targets(boxes, p.get('lines', []))
         own = None
@@ -869,7 +1080,7 @@ class Converter:
             self.canvases += 1
             own = 'cv%d' % self.canvases
         lines, ports, pres, count = [], {}, [], 0
-        if face and not gop and face_size(p):
+        if device and face_size(p):
             # Live draws a device on its own background (#363636 in Live 12's dark theme);
             # behind everything on the face, above the patch in edit mode
             w, h = face_size(p)
@@ -883,14 +1094,17 @@ class Converter:
             self.boxes += 1
             tr = self.box(b, face, own, gop)
             ports[b['id']] = (count, tr, b)
+            count += len(tr.objs)
+        extra = [PdObj('#X obj 0 0 namecanvas \\$0-%s;' % n, text_bounds(0, 0, 'namecanvas $0-' + n, 0, 0), 0, 0)
+                 for n in ([own] if own else []) + list(names)]
+        place = self.layout(ports, extra)
+        for base, tr, b in ports.values():
             for k, o in enumerate(tr.objs):
                 lines.extend(o.lines)
                 if face and o.pres is not None:
-                    pres.append((count + k, o.pres))
-            count += len(tr.objs)
-        if own:
-            lines.append('#X obj 10 10 namecanvas \\$0-%s;' % own)
-            count += 1
+                    pres.append((base + k, o.pres))
+        for o in extra:
+            lines.extend(o.lines)
         conns = []
         for base, tr, b in ports.values():
             for k, so, k2, di in tr.conns:
@@ -928,8 +1142,8 @@ class Converter:
             if pl.get('midpoints') and so_obj.bounds and do_obj.bounds:
                 o = iolet_centre(so_obj.bounds, sout, False, so_obj.nin, so_obj.nout)
                 i = iolet_centre(do_obj.bounds, din, True, do_obj.nin, do_obj.nout)
-                path = cord_path(pl['midpoints'], sbox.get('patching_rect', [0, 0, 0, 0]),
-                                 dbox.get('patching_rect', [0, 0, 0, 0]), o, i)
+                path = cord_path(pl['midpoints'], place(sbox.get('patching_rect', [0, 0, 0, 0])),
+                                 place(dbox.get('patching_rect', [0, 0, 0, 0])), o, i, place)
             rect = dbox.get('patching_rect', [0, 0, 0, 0])
             cords.append(((sbase + sk, sout), dbase + dk, din, path, pl.get('order'), (-rect[0], -rect[1])))
         groups = {}
@@ -946,12 +1160,120 @@ class Converter:
         for (s, so, _, _), d, di, path in conns:
             lines.append('#X connect %d %d %d %d%s;' % (s, so, d, di, ' ' + path if path else ''))
         if face and pres:
-            size = (gop[0], gop[1]) if gop else face_size(p)
+            size = (gop[0], gop[1]) if gop else face_size(p, device)
             if size:
                 lines.append('#X presentation size %d %d;' % size)
             for idx, (px, py) in pres:
                 lines.append('#X presentation obj %d %d %d;' % (idx, px, py))
         return lines
+
+    def layout(self, ports, extra):
+        """Max's patching layout in plugdata's sizes. plugdata draws box text bigger than Max
+        (Inter at 15 px against Arial at 10 or 12 pt), so the layout is widened by the factor
+        that fits Max's boxes to their text, and every text box keeps its Max width in that
+        scale. Boxes that still collide where Max's don't (a box that needs more room, the
+        helpers a translation adds under its object) push their row apart: to the right
+        within a row, and down for everything below. -> place: Max rect -> its rect here."""
+        units = []
+        ratios = []
+        for base, tr, b in ports.values():
+            r = [float(v) for v in (b.get('patching_rect') or [0, 0, 20, 20])[:4]]
+            main = tr.objs[0]
+            if main.kind in ('obj', 'msg') and r[2] > 8:
+                ratios.append((inter_width(main.text()) + 13) / r[2])
+            skip = b.get('background') or b.get('maxclass') in ('panel', 'live.line', 'fpic', 'live.colors', 'swatch')
+            units.append({'objs': tr.objs, 'max': r, 'skip': skip, 'text': main.kind is not None})
+        ratios.sort()
+        sx = min(max(ratios[int(0.8 * (len(ratios) - 1))], 1.0), 1.6) if ratios else 1.0
+        gap = 4
+
+        def bbox(u):
+            rs = [o.bounds for o in u['objs'] if o.bounds]
+            if not rs:
+                return None
+            x0, y0 = min(r[0] for r in rs), min(r[1] for r in rs)
+            return (x0, y0, max(r[0] + r[2] for r in rs) - x0, max(r[1] + r[3] for r in rs) - y0)
+
+        def move(u, dx, dy):
+            for o in u['objs']:
+                o.move(int(dx), int(dy))
+            u['pd'] = bbox(u)
+
+        def apart(a, b):  # (x, y, w, h) rects that don't touch
+            return a[0] + a[2] <= b[0] or b[0] + b[2] <= a[0] or a[1] + a[3] <= b[1] or b[1] + b[3] <= a[1]
+
+        for u in units:
+            x, y, w, h = u['max']
+            u['m'] = (x * sx, y, w * sx if u['text'] else w, h)  # Max's box, widened
+            main = u['objs'][0]
+            if main.kind and main.bounds:
+                main.set_width(w * sx)
+            move(u, int(round(x * sx)) - int(x), 0)
+        live = [u for u in units if not u['skip'] and u['pd']]
+        # within a row (boxes side by side in Max): push to the right
+        placed = []
+        for u in sorted(live, key=lambda u: u['m'][0]):
+            dx = 0
+            for a in placed:
+                am, um = a['m'], u['m']
+                if am[1] + am[3] <= um[1] or um[1] + um[3] <= am[1] or not apart(am, um) or am[0] >= um[0]:
+                    continue
+                if a['pd'][1] + a['pd'][3] <= u['pd'][1] or u['pd'][1] + u['pd'][3] <= a['pd'][1]:
+                    continue
+                dx = max(dx, a['pd'][0] + a['pd'][2] + gap - u['pd'][0])
+            if dx > 0:
+                move(u, dx, 0)
+            placed.append(u)
+        # rows further down: everything below moves down together, so cords stay straight
+        steps = []
+        off = 0
+        placed = []
+        rows = {}
+        for u in live:
+            rows.setdefault(u['max'][1], []).append(u)
+        for y in sorted(rows):
+            row = rows[y]
+            for u in row:
+                move(u, 0, off)
+            more = 0
+            for u in row:
+                for a in placed:
+                    if not apart(a['m'], u['m']) or apart((a['pd'][0], 0, a['pd'][2], 1), (u['pd'][0], 0, u['pd'][2], 1)):
+                        continue
+                    space = u['max'][1] - (a['max'][1] + a['max'][3])
+                    need = a['pd'][1] + a['pd'][3] + max(gap, min(space, 10)) - u['pd'][1]
+                    more = max(more, need)
+            if more > 0:
+                for u in row:
+                    move(u, 0, more)
+                off += more
+            steps.append((y, off))
+            placed += row
+
+        def off_at(y):
+            o = 0
+            for sy, so in steps:
+                if sy <= y:
+                    o = so
+            return o
+
+        for u in units:
+            if u['skip'] or not u['pd']:
+                move(u, 0, off_at(u['max'][1]))
+        # [namecanvas] and other helpers of the canvas: to the right of the patch
+        right = max([u['pd'][0] + u['pd'][2] for u in units if u['pd']] or [0]) + 30
+        top = min([u['pd'][1] for u in units if u['pd']] or [10])
+        for k, o in enumerate(extra):
+            o.move(right, top + 30 * k)
+
+        def place(rect):
+            """a Max rect (or a point) -> where it is here"""
+            x, y = float(rect[0]), float(rect[1])
+            out = [int(round(x * sx)), int(round(y + off_at(y)))]
+            if len(rect) > 2:
+                out += [rect[2] * sx, rect[3]]
+            return out
+        return place
 
     @staticmethod
     def label(b):
@@ -969,22 +1291,22 @@ class Converter:
         rect = face or prect
         pres = (int(face[0]), int(face[1])) if face else None
 
-        def obj(pdtext, nout_pd=None, h=20):
-            return Tr(PdObj('#X obj %s %s;' % (xy, pdtext), text_bounds(x, y, pdtext, nin, nout, h), nin, nout),
+        def obj(pdtext, nout_pd=None):
+            return Tr(PdObj('#X obj %s %s;' % (xy, pdtext), text_bounds(x, y, pdtext, nin, nout), nin, nout, kind='obj'),
                       nout=nout_pd)
 
         def sub(lines, name, n_in=None, n_out=None):
-            return Tr(PdObj(lines, text_bounds(x, y, 'pd ' + name, nin, nout, 19),
-                            nin if n_in is None else n_in, nout if n_out is None else n_out))
+            n_in = nin if n_in is None else n_in
+            n_out = nout if n_out is None else n_out
+            return Tr(PdObj(lines, text_bounds(x, y, 'pd ' + name, n_in, n_out), n_in, n_out, kind='obj'))
 
         if cls == 'newobj':
             words = text.split(' ', 1)
             name, args = words[0], (words[1] if len(words) > 1 else '')
             if name in ('p', 'patcher') and 'patcher' in b:
                 subname = (pd_escape(args) or 'sub').replace(' ', '_')
-                inner = self.patcher(b['patcher'])
-                if '_canvas' in b:
-                    inner.append('#X obj 10 10 namecanvas \\$0-%s;' % b['_canvas'])
+                inner = self.patcher(b['patcher'], face=face_size(b['patcher'], False) is not None,
+                                     names=[b['_canvas']] if '_canvas' in b else ())
                 return sub(['#N canvas 0 50 700 500 %s 0;' % subname] + inner
                            + ['#X restore %s pd %s;' % (xy, pd_escape(args) or 'sub')], subname)
             if name == 'tapin~' and '_delay' in b:
@@ -1001,6 +1323,13 @@ class Converter:
                 return sub(subpatch(xy, 'tapout~', objs, conns), 'tapout~')
             if name == 'poly~':
                 return self.poly(b, xy, args, sub)
+            used = b.get('_used', set())
+            if name == 'midiparse' and 7 in used:
+                return sub(midiparse_sub(xy), 'midiparse', 1, 8)
+            if name == 'live.thisdevice' and used - {0}:
+                return sub(thisdevice_sub(xy), 'live.thisdevice', 1, 3)
+            if name == 'live.colors' and used - {0}:
+                return sub(inert_sub(xy, 'live.colors', max(nout, 1)), 'live.colors', 1, max(nout, 1))
             if name == 'pcontrol':
                 return sub(self.pcontrol_sub(xy, b.get('_opens', [])), 'pcontrol', 1, 1)
             if name == 'thispatcher':
@@ -1014,12 +1343,16 @@ class Converter:
             if name == 'ctlout' and args.split() and not re.match(r'^[-\d$#]', args.split()[0]):
                 args = ' '.join(args.split()[1:])  # a MIDI port name, plugdata has one port
             if name == 'pattr':
+                if 1 in used:  # the middle outlet binds pattr to an object: what pattr gets, it sets
+                    return obj('t a a', 2)
                 args = ''
             if name.startswith('zl.') and len(name) > 3:
                 name, args = 'zl', (name[3:] + ' ' + args).strip()  # cyclone's [zl] takes the mode first
             if '@' in args and name not in ('js', 'v8', 'node.script', 'gen~'):
                 args, attrs = strip_attributes(args)
                 self.warn('%s: dropped Max attributes %s' % (name, ', '.join('@' + a for a in attrs)))
+            if name in ('sel', 'select') and len(args.split()) > 1 and b.get('_fed', set()) - {0}:
+                return sub(select_sub(xy, args.split()), 'sel', len(args.split()) + 1, len(args.split()) + 1)
             if name in ('t', 'trigger', 'pack', 'pak', 'unpack'):
                 args = fix_types(args)
                 if name == 'pak':
@@ -1033,7 +1366,7 @@ class Converter:
                 m = re.match(r'(.+?)\s+then\s+bang$', args)
                 if m:  # [if a then bang] -> [expr if(a, 1, 0)] -> [sel 1]
                     e = 'expr if(%s \\, 1 \\, 0)' % m.group(1)
-                    return Tr([PdObj('#X obj %s %s;' % (xy, e.replace('$', '\\$')), text_bounds(x, y, e, nin, 1), nin, 1),
+                    return Tr([PdObj('#X obj %s %s;' % (xy, e.replace('$', '\\$')), text_bounds(x, y, e, nin, 1), nin, 1, kind='obj'),
                                PdObj('#X obj %d %d sel 1;' % (x, y + 24), text_bounds(x, y + 24, 'sel 1', 2, 2), 2, 2)],
                               outmap={0: (1, 0)}, inmap={k: (0, k) for k in range(nin)}, conns=[(0, 0, 1, 0)])
                 self.warn('kept [if %s]' % args)
@@ -1043,11 +1376,19 @@ class Converter:
             return obj(pd_escape((name + ' ' + args).strip()), PD_OUTLETS.get(words[0]))
 
         if cls == 'message':
-            return Tr(PdObj('#X msg %s %s;' % (xy, pd_escape(text)), (x, y, max(min(7 * len(text) + 13, 420), 14), 20), 1, 1))
+            t = pd_escape(text)
+            msg = PdObj('#X msg %s %s;' % (xy, t), text_bounds(x, y, t, 1, 1), 1, 1, kind='msg')
+            if 1 not in b.get('_fed', ()):
+                return Tr(msg)
+            # Max's right inlet sets the message without sending it; Pd's message has one inlet
+            return Tr([msg, PdObj('#X obj %d %d cyclone/prepend set;' % (x, y - 24),
+                                  text_bounds(x, y - 24, 'cyclone/prepend set'), 1, 1)],
+                      inmap={0: (0, 0), 1: (1, 0)}, conns=[(1, 0, 0, 0)])
         if cls in ('comment', 'live.comment'):
             if face:
                 return comment(b, (x, y), rect, face)
-            return Tr(PdObj('#X text %s %s;' % (xy, pd_escape(text) or '.'), None, 0, 0), nout=0)
+            t = pd_escape(text) or '.'
+            return Tr(PdObj('#X text %s %s;' % (xy, t), text_bounds(x, y, t, 0, 0), 0, 0, kind='text'), nout=0)
         if cls == 'inlet':
             sig = 'signal' in (b.get('outlettype') or [''])
             return obj('inlet~' if sig else 'inlet')
@@ -1096,6 +1437,8 @@ class Converter:
             n = max(2, len([i for i in items if i != ',']) if isinstance(items, list) else 2)
             return Tr(PdObj('#X obj %s hradio 15 1 0 %d empty empty empty 0 -8 0 10 #fcfcfc #000000 #000000 0;' % (xy, n),
                             (x, y, 15 * n + 1, 16), 1, 1, pres), nout=1)
+        if cls == 'scope~':
+            return scope(b, (x, y), rect, face)
         if cls == 'panel':
             return panel(b, (x, y), rect, face)
         if cls == 'live.line':
@@ -1119,9 +1462,7 @@ class Converter:
         gop = (w, h, -int(num(off[0])), -int(num(off[1])))
         nin, nout = b.get('numinlets', 0), b.get('numoutlets', 0)
         if 'patcher' in b:
-            inner = self.patcher(b['patcher'], face=True, gop=gop)
-            if '_canvas' in b:
-                inner.append('#X obj 10 10 namecanvas \\$0-%s;' % b['_canvas'])
+            inner = self.patcher(b['patcher'], face=True, gop=gop, names=[b['_canvas']] if '_canvas' in b else ())
             lines = (['#N canvas 0 50 700 500 bpatcher 0;'] + inner
                      + ['#X coords 0 -1 1 1 %d %d 2 %d %d;' % gop, '#X restore %d %d pd bpatcher;' % (x, y)])
             return Tr(PdObj(lines, (x, y, w, h), nin, nout, pres))
@@ -1153,17 +1494,50 @@ class Converter:
         return sub(['#N canvas 0 50 450 300 poly~ 0;', '#X restore %s pd poly~;' % xy], 'poly~')
 
     def voice_patcher(self, p):
-        """a poly~ voice as a subpatch: [in N]/[out N] become inlets/outlets in N's order"""
+        """a poly~ voice as a subpatch: [in N]/[out N] become inlets/outlets in N's order. The
+        poly~'s left inlet takes the 'midievent' messages for [polymidiin] too, as in Max."""
         p = json.loads(json.dumps(p))
-        for bb in p.get('boxes', []):
+        boxes = p.setdefault('boxes', [])
+        lines = p.setdefault('lines', [])
+        in1, midi = None, []
+        for bb in boxes:
             box = bb['box']
             words = (box.get('text') or '').split()
             if words and words[0] in ('in', 'in~', 'out', 'out~'):
                 k = int(num(words[1], 1)) if len(words) > 1 else 1
                 box['text'] = {'in': 'inlet', 'in~': 'inlet~', 'out': 'outlet', 'out~': 'outlet~'}[words[0]]
                 box['patching_rect'] = [20 + 60 * (k - 1), box.get('patching_rect', [0, 0])[1]] + box.get('patching_rect', [0, 0, 40, 20])[2:]
-            elif words and words[0] in ('thispoly~', 'polymidiin'):
+                if words[0] == 'in' and k == 1:
+                    in1 = box
+            elif words and words[0] == 'thispoly~':
                 box['text'] = 't a'
+            elif words and words[0] == 'polymidiin':
+                midi.append(box)
+        if midi:
+            self.taps += 1
+            name = '---polymidi%d' % self.taps
+            for box in midi:
+                box['text'] = 'r ' + name  # [polymidiin] sends the voice's MIDI bytes
+            ys = [float((bb['box'].get('patching_rect') or [0, 0])[1]) for bb in boxes]
+            top = min(ys) - 90 if ys else 0
+            def add(text, x, y, n_in, n_out):
+                bid = 'obj-polymidi-%d' % len(boxes)
+                boxes.append({'box': {'id': bid, 'maxclass': 'newobj', 'text': text, 'numinlets': n_in,
+                                      'numoutlets': n_out, 'patching_rect': [x, y, 100.0, 20.0]}})
+                return bid
+            if in1 is None:
+                in1 = boxes[next(k for k, bb in enumerate(boxes) if bb['box']['id'] == add('inlet', 20.0, top, 0, 1))]['box']
+            x, y = float(in1['patching_rect'][0]), float(in1['patching_rect'][1])
+            route = add('route midievent', x + 60, y + 30, 1, 2)
+            it = add('iter', x + 60, y + 55, 1, 1)
+            snd = add('s ' + name, x + 60, y + 80, 1, 0)
+            for l in lines:
+                pl = l.get('patchline', l)
+                if pl['source'][0] == in1['id']:
+                    pl['source'] = [route, 1]
+            lines += [{'patchline': {'source': [in1['id'], 0], 'destination': [route, 0]}},
+                      {'patchline': {'source': [route, 0], 'destination': [it, 0]}},
+                      {'patchline': {'source': [it, 0], 'destination': [snd, 0]}}]
         return self.patcher(p)
 
     @staticmethod
@@ -1252,7 +1626,7 @@ def convert(src, outroot):
 
     conv = Converter(outdir, abstractions)
     has_face = face_size(main['patcher']) is not None
-    lines = ['#N canvas 0 50 1000 700 12;'] + conv.patcher(main['patcher'], face=has_face)
+    lines = ['#N canvas 0 50 1000 700 12;'] + conv.patcher(main['patcher'], face=has_face, device=True)
     out = os.path.join(outdir, base + '.pd')
     with open(out, 'w') as f:
         f.write('\n'.join(lines) + '\n')
