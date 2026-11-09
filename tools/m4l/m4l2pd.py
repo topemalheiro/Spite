@@ -862,7 +862,8 @@ def toggle_button(b, xy, rect, face, conv):
     mode = 1 if (cls == 'live.toggle' or (cls == 'live.text' and b.get('mode', 1) == 1)) else 2
     bg = color(b.get('bgcolor') or b.get('activebgcolor'), LIVE['off'])
     fg = color(b.get('bgoncolor') or b.get('activebgoncolor'), LIVE['on'])
-    objs = [PdObj('#X obj %d %d button %d %d %s %s %d 0 0 0 0 empty empty;' % (xy[0], xy[1], max(w, 8), max(h, 8), bg, fg, mode),
+    oval = 1 if cls == 'live.button' else 0  # Live draws live.button round; ELSE's [button] arg 8
+    objs = [PdObj('#X obj %d %d button %d %d %s %s %d 0 0 %d 0 empty empty;' % (xy[0], xy[1], max(w, 8), max(h, 8), bg, fg, mode, oval),
                   (xy[0], xy[1], w, h), 1, 1, (int(face[0]), int(face[1])) if face else None)]
     text = b.get('text') if cls == 'live.text' else ''
     if text:
