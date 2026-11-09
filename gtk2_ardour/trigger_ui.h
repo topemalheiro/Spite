@@ -19,14 +19,12 @@
 #pragma once
 
 #include "ytkmm/colorselection.h"
-#include "ytkmm/entry.h"
 
 #include "gtkmm2ext/actions.h"
 #include "gtkmm2ext/bindings.h"
 
 #include "ardour/triggerbox.h"
 #include "widgets/ardour_button.h"
-#include "widgets/frame.h"
 
 namespace Gtk
 {
@@ -44,13 +42,20 @@ class ArdourColorDialog;
 class TriggerUI : virtual public sigc::trackable
 {
 public:
-	TriggerUI ();
+	/* Spite: box_signals false when the owner relays the box's signals,
+	 * as TriggerBoxUI does for its rows: one connection per box instead of
+	 * one per scene, see TriggerBoxUI.
+	 */
+	TriggerUI (bool box_signals = true);
 	virtual ~TriggerUI ();
 
 	void set_trigger (ARDOUR::TriggerReference);
 
 	virtual void on_trigger_set () {}
 	virtual void on_trigger_changed (PBD::PropertyChange const& ) = 0;
+
+	/* Spite: the box put another trigger (a newly loaded clip) in our slot */
+	void trigger_swapped ();
 
 	static std::string follow_action_to_string (ARDOUR::FollowAction const &, bool with_targets=false);
 	static std::string quantize_length_to_string (Temporal::BBT_Offset const &);
@@ -106,24 +111,14 @@ private:
 	void trigger_changed (PBD::PropertyChange const& );  //calls on_trigger_changed to subclasses
 
 protected:
-	/* all of this for name editing ...  */
-	bool namebox_button_press (GdkEventButton*);
-	bool start_rename ();
-	void end_rename (bool);
-	void entry_changed ();
-	void entry_activated ();
-	bool entry_focus_in (GdkEventFocus*);
-	bool entry_focus_out (GdkEventFocus*);
-	bool entry_key_press (GdkEventKey*);
-	bool entry_key_release (GdkEventKey*);
-	bool entry_button_press (GdkEventButton*);
-	void disconnect_entry_signals ();
-	std::list<sigc::connection> _entry_connections;
-	bool                        _renaming;
-	Gtk::Entry                  _nameentry;
-	Gtk::Label                  _name_label;
-	Gtk::EventBox               _namebox;
-	ArdourWidgets::Frame        _name_frame;
+	/* Spite: the current trigger's own signals, into trigger_connections;
+	 * when the slot gets another trigger they are made again.
+	 */
+	virtual void connect_to_trigger ();
+
+	/* Spite: the name editing widgets are SlotPropertyTable's: a row in the
+	 * clip grid (TriggerEntry) is a TriggerUI too, one per scene and track.
+	 */
 
 	Gtk::FileChooserDialog* _file_chooser;
 	sigc::connection        _file_chooser_connection;
@@ -135,6 +130,7 @@ protected:
 
 	ArdourColorDialog*   _color_dialog;
 
+	bool                  _box_signals; /* Spite: false when the owner relays them */
 	void                  trigger_swap (uint32_t);
 	PBD::ScopedConnection trigger_swap_connection;
 

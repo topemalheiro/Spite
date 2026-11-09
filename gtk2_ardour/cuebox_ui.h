@@ -56,20 +56,19 @@ public:
 	void _size_allocate (ArdourCanvas::Rect const&);
 	bool event_handler (GdkEvent*);
 
-private:
-	void shape_play_button ();
-	void ui_parameter_changed (std::string const& p);
+	/* Spite: CueBoxUI calls this for all rows when the theme or the cue
+	 * recording state changes, instead of each row connecting to both
+	 */
 	void set_default_colors ();
 
-	void rec_state_changed ();
-
-	PBD::ScopedConnectionList _session_connections;
+private:
+	void shape_play_button ();
 
 	uint64_t _cue_idx;
 	bool _grabbed;
 };
 
-class CueBoxUI : public ArdourCanvas::Rectangle, public ARDOUR::SessionHandlePtr
+class CueBoxUI : public ArdourCanvas::Rectangle, public ARDOUR::SessionHandlePtr, public sigc::trackable
 {
 public:
 	CueBoxUI (ArdourCanvas::Item* parent);
@@ -100,9 +99,14 @@ private:
 	Gtk::Menu* _context_menu;
 	Gtk::ColorSelectionDialog _color_dialog;
 
-	typedef std::vector<ArdourCanvas::Rectangle*> Slots;
+	typedef std::vector<CueEntry*> Slots;
 
 	Slots _slots;
+
+	/* Spite: for all rows, see CueEntry::set_default_colors () */
+	PBD::ScopedConnectionList _cue_connections;
+	void rows_colors_changed ();
+	void ui_parameter_changed (std::string const&);
 };
 
 class CueBoxWidget : public FittedCanvasWidget, public ARDOUR::SessionHandlePtr

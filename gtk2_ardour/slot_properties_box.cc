@@ -45,6 +45,7 @@
 
 #include "ardour_ui.h"
 #include "audio_clock.h"
+#include "keyboard.h"
 #include "region_view.h"
 #include "trigger_ui.h"
 #include "utils.h"
@@ -115,7 +116,7 @@ SlotPropertyTable::SlotPropertyTable ()
 	, _legato_button (ArdourButton::led_default_elements)
 	, _isolate_button (ArdourButton::led_default_elements)
 	, _ignore_changes(false)
-
+	, _renaming (false)
 {
 	using namespace Gtk::Menu_Helpers;
 	using namespace ArdourWidgets;
@@ -740,4 +741,154 @@ SlotPropertyWidget::SlotPropertyWidget ()
 	ui = new SlotPropertyTable ();
 	pack_start(*ui);
 	ui->show();
+}
+
+/* ****************************************************************************/
+/* name editing (Spite: moved here from TriggerUI, whose other users, the clip
+ * grid's rows, never edit a name in place)
+ */
+
+bool
+SlotPropertyTable::namebox_button_press (GdkEventButton* ev)
+{
+	if (_renaming) {
+		return false;
+	}
+	if ((ev->button == 1 && ev->type == GDK_2BUTTON_PRESS) || Gtkmm2ext::Keyboard::is_edit_event (ev)) {
+		start_rename ();
+		return true;
+	}
+	return false;
+}
+
+bool
+SlotPropertyTable::start_rename ()
+{
+	if (_renaming) {
+		return false;
+	}
+	assert (_entry_connections.empty ());
+
+	GtkRequisition r (_name_label.size_request ());
+	_nameentry.set_size_request (r.width, -1);
+	_nameentry.set_text (trigger()->name ());
+	_namebox.remove ();
+	_namebox.add (_nameentry);
+	_nameentry.show ();
+	_nameentry.grab_focus ();
+	_nameentry.add_modal_grab ();
+	_renaming = true;
+
+	_entry_connections.push_back (_nameentry.signal_changed().connect (sigc::mem_fun (*this, &SlotPropertyTable::entry_changed)));
+	_entry_connections.push_back (_nameentry.signal_activate().connect (sigc::mem_fun (*this, &SlotPropertyTable::entry_activated)));
+	_entry_connections.push_back (_nameentry.signal_key_press_event().connect (sigc::mem_fun (*this, &SlotPropertyTable::entry_key_press), false));
+	_entry_connections.push_back (_nameentry.signal_key_release_event().connect (sigc::mem_fun (*this, &SlotPropertyTable::entry_key_release), false));
+	_entry_connections.push_back (_nameentry.signal_button_press_event ().connect (sigc::mem_fun (*this, &SlotPropertyTable::entry_button_press), false));
+	_entry_connections.push_back (_nameentry.signal_focus_in_event ().connect (sigc::mem_fun (*this, &SlotPropertyTable::entry_focus_in)));
+	_entry_connections.push_back (_nameentry.signal_focus_out_event ().connect (sigc::mem_fun (*this, &SlotPropertyTable::entry_focus_out)));
+	return true;
+}
+
+void
+SlotPropertyTable::end_rename (bool ignore_change)
+{
+	if (!_renaming) {
+		return;
+	}
+	std::string result = _nameentry.get_text ();
+	disconnect_entry_signals ();
+	_nameentry.remove_modal_grab ();
+	_namebox.remove ();
+	_namebox.add (_name_label);
+	_name_label.show ();
+	_renaming = false;
+
+	if (ignore_change) {
+		return;
+	}
+
+	trigger()->set_name (result);
+}
+
+void
+SlotPropertyTable::entry_changed ()
+{
+}
+
+void
+SlotPropertyTable::entry_activated ()
+{
+	end_rename (false);
+}
+
+bool
+SlotPropertyTable::entry_focus_in (GdkEventFocus*)
+{
+	return false;
+}
+
+bool
+SlotPropertyTable::entry_focus_out (GdkEventFocus*)
+{
+	end_rename (false);
+	return false;
+}
+
+bool
+SlotPropertyTable::entry_button_press (GdkEventButton* ev)
+{
+	if (Gtkmm2ext::Keyboard::is_context_menu_event (ev)) {
+		return false;
+	} else if (Gtkmm2ext::event_inside_widget_window (_namebox, (GdkEvent*) ev)) {
+		return false;
+	} else {
+		end_rename (false);
+		return false;
+	}
+}
+
+bool
+SlotPropertyTable::entry_key_press (GdkEventKey* ev)
+{
+	switch (ev->keyval) {
+		case GDK_Escape:
+			[[fallthrough]];
+		case GDK_ISO_Left_Tab:
+			[[fallthrough]];
+		case GDK_Tab:
+			return true;
+		default:
+			break;
+	}
+	return false;
+}
+
+bool
+SlotPropertyTable::entry_key_release (GdkEventKey* ev)
+{
+	switch (ev->keyval) {
+		case GDK_Escape:
+			end_rename (true);
+			return true;
+		case GDK_ISO_Left_Tab:
+			end_rename (false);
+//			EditNextName (this, false); /* TODO */
+			return true;
+		case GDK_Tab:
+			end_rename (false);
+//			EditNextName (this, true); /* TODO */
+			return true;
+		default:
+			break;
+	}
+	return false;
+}
+
+void
+SlotPropertyTable::disconnect_entry_signals ()
+{
+	for (std::list<sigc::connection>::iterator i = _entry_connections.begin(); i != _entry_connections.end(); ++i) {
+		i->disconnect ();
+	}
+	_entry_connections.clear ();
 }

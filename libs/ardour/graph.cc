@@ -359,7 +359,10 @@ Graph::helper_thread ()
 		snprintf (name, 64, "RT-%u-%p", id, (void*)DEBUG_THREAD_SELF);
 		pthread_set_name (name);
 		SessionEvent::create_per_thread_pool (name, 64);
-		PBD::notify_event_loops_about_thread_creation (pthread_self (), name, 64);
+		/* Spite: room for the GUI requests of many tracks at once, e.g. a cue
+		 * that starts or stops clips on all of them in the same cycle (each
+		 * box's signals reach a few GUI objects); the engine thread has 4096 */
+		PBD::notify_event_loops_about_thread_creation (pthread_self (), name, 1024);
 	}
 
 	suspend_rt_malloc_checks ();
@@ -392,7 +395,7 @@ Graph::main_thread ()
 		snprintf (name, 64, "RT-main-%p", (void*)DEBUG_THREAD_SELF);
 		pthread_set_name (name);
 		SessionEvent::create_per_thread_pool (name, 64);
-		PBD::notify_event_loops_about_thread_creation (pthread_self (), name, 64);
+		PBD::notify_event_loops_about_thread_creation (pthread_self (), name, 1024); /* Spite: see helper_thread () */
 	}
 	resume_rt_malloc_checks ();
 

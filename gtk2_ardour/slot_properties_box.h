@@ -22,6 +22,8 @@
 #include <map>
 
 #include <ytkmm/box.h>
+#include <ytkmm/entry.h>
+#include <ytkmm/eventbox.h>
 #include <ytkmm/label.h>
 #include "ytkmm/sizegroup.h"
 #include <ytkmm/table.h>
@@ -30,6 +32,7 @@
 #include "ardour/session_handle.h"
 
 #include "widgets/ardour_button.h"
+#include "widgets/frame.h"
 #include "widgets/slider_controller.h"
 #include "widgets/ardour_dropdown.h"
 
@@ -142,6 +145,25 @@ private:
 	bool     _ignore_changes;
 
 	PatchChangeTriggerWindow _patch_change_window;
+
+	/* name editing (Spite: here, not in every TriggerUI) */
+	bool namebox_button_press (GdkEventButton*);
+	bool start_rename ();
+	void end_rename (bool);
+	void entry_changed ();
+	void entry_activated ();
+	bool entry_focus_in (GdkEventFocus*);
+	bool entry_focus_out (GdkEventFocus*);
+	bool entry_key_press (GdkEventKey*);
+	bool entry_key_release (GdkEventKey*);
+	bool entry_button_press (GdkEventButton*);
+	void disconnect_entry_signals ();
+	std::list<sigc::connection> _entry_connections;
+	bool                        _renaming;
+	Gtk::Entry                  _nameentry;
+	Gtk::Label                  _name_label;
+	Gtk::EventBox               _namebox;
+	ArdourWidgets::Frame        _name_frame;
 };
 
 class SlotPropertyWidget : public Gtk::VBox

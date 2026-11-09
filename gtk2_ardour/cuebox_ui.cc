@@ -85,11 +85,7 @@ CueEntry::CueEntry (Item* item, uint64_t cue_index)
 
 	set_tooltip (_("Click to launch all clips in this row\nRight-click to select properties for all clips in this row"));
 
-	/* watch for cue-recording state */
-	TriggerBox::CueRecordingChanged.connect (_session_connections, MISSING_INVALIDATOR, std::bind (&CueEntry::rec_state_changed, this), gui_context ());
-
-	/* watch for change in theme */
-	UIConfiguration::instance ().ParameterChanged.connect (sigc::mem_fun (*this, &CueEntry::ui_parameter_changed));
+	/* Spite: CueBoxUI follows the cue-recording state and the theme for all rows */
 	set_default_colors ();
 }
 
@@ -203,20 +199,6 @@ CueEntry::set_default_colors ()
 	}
 }
 
-void
-CueEntry::ui_parameter_changed (std::string const& p)
-{
-	if (p == "color-file") {
-		set_default_colors ();
-	}
-}
-
-void
-CueEntry::rec_state_changed ()
-{
-	set_default_colors ();
-}
-
 CueBoxUI::CueBoxUI (ArdourCanvas::Item* parent)
 	: ArdourCanvas::Rectangle (parent)
 	, _context_menu (0)
@@ -227,6 +209,26 @@ CueBoxUI::CueBoxUI (ArdourCanvas::Item* parent)
 	set_fill (true);
 
 	build ();
+
+	/* Spite: once for all rows (each row used to connect to both) */
+	TriggerBox::CueRecordingChanged.connect (_cue_connections, invalidator (*this), std::bind (&CueBoxUI::rows_colors_changed, this), gui_context ());
+	UIConfiguration::instance ().ParameterChanged.connect (sigc::mem_fun (*this, &CueBoxUI::ui_parameter_changed));
+}
+
+void
+CueBoxUI::rows_colors_changed ()
+{
+	for (auto& slot : _slots) {
+		slot->set_default_colors ();
+	}
+}
+
+void
+CueBoxUI::ui_parameter_changed (std::string const& p)
+{
+	if (p == "color-file") {
+		rows_colors_changed ();
+	}
 }
 
 CueBoxUI::~CueBoxUI ()

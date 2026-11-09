@@ -67,10 +67,12 @@ using namespace PBD;
 
 TriggerEntry::TriggerEntry (Item* item, TriggerStrip& s, TriggerReference tr)
 	: ArdourCanvas::Rectangle (item)
+	, TriggerUI (false) /* Spite: TriggerBoxUI relays the box's signals */
 	, _strip (s)
 	, _grabbed (false)
 	, _drag_active (false)
 	, rec_blink_on (false)
+	, _drawn_selected (false)
 {
 	set_layout_sensitive (true); // why???
 
@@ -81,7 +83,7 @@ TriggerEntry::TriggerEntry (Item* item, TriggerStrip& s, TriggerReference tr)
 	play_button = new ArdourCanvas::Rectangle (this);
 	play_button->set_outline (true);
 	play_button->set_fill (true);
-	play_button->name = string_compose ("playbutton %1", tref.slot());
+	play_button->name = string_compose ("playbutton %1", tr.slot());
 	play_button->show ();
 
 	follow_button = new ArdourCanvas::Rectangle (this);
@@ -105,17 +107,6 @@ TriggerEntry::TriggerEntry (Item* item, TriggerStrip& s, TriggerReference tr)
 	/* this will trigger a call to on_trigger_changed() */
 	set_trigger (tr);
 
-	trigger()->ArmChanged.connect (_rec_enable_connections, MISSING_INVALIDATOR, std::bind (&TriggerEntry::rec_enable_change, this), gui_context());
-	tref.box()->RecEnableChanged.connect (_rec_enable_connections, MISSING_INVALIDATOR, std::bind (&TriggerEntry::rec_enable_change, this), gui_context());
-
-	/* DnD Source */
-	GtkCanvas* gtkcanvas = static_cast<GtkCanvas*> (canvas ());
-	assert (gtkcanvas);
-
-	gtkcanvas->signal_drag_begin ().connect (sigc::mem_fun (*this, &TriggerEntry::drag_begin));
-	gtkcanvas->signal_drag_end ().connect (sigc::mem_fun (*this, &TriggerEntry::drag_end));
-	gtkcanvas->signal_drag_data_get ().connect (sigc::mem_fun (*this, &TriggerEntry::drag_data_get));
-
 	/* event handling */
 	play_button->Event.connect (sigc::mem_fun (*this, &TriggerEntry::play_button_event));
 	name_button->Event.connect (sigc::mem_fun (*this, &TriggerEntry::name_button_event));
@@ -123,14 +114,11 @@ TriggerEntry::TriggerEntry (Item* item, TriggerStrip& s, TriggerReference tr)
 
 	Event.connect (sigc::mem_fun (*this, &TriggerEntry::event));
 
-	/* watch for change in theme */
-	UIConfiguration::instance ().ParameterChanged.connect (sigc::mem_fun (*this, &TriggerEntry::ui_parameter_changed));
+	/* Spite: the canvas's drag signals, theme changes, the track's color and
+	 * the box's signals come through TriggerBoxUI
+	 */
 	set_widget_colors ();
 
-	/* owner color changes (?) */
-	dynamic_cast<Stripable*> (tref.box()->owner ())->presentation_info ().Change.connect (_owner_prop_connection, MISSING_INVALIDATOR, std::bind (&TriggerEntry::owner_prop_change, this, _1), gui_context ());
-
-	selection_change ();
 	rec_enable_change ();
 }
 
@@ -139,20 +127,26 @@ TriggerEntry::~TriggerEntry ()
 }
 
 void
+TriggerEntry::connect_to_trigger ()
+{
+	TriggerUI::connect_to_trigger ();
+
+	TriggerPtr t (trigger ());
+	if (t) {
+		t->ArmChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerEntry::rec_enable_change, this), gui_context ());
+	}
+}
+
+void
 TriggerEntry::repoint (TriggerReference tr)
 {
 	/* Spite: scenes were inserted or removed, and this row now shows slot
 	 * tr.slot (): connect to that trigger, as the constructor does
 	 */
-	_rec_enable_connections.drop_connections ();
-
 	name = string_compose ("trigger %1", tr.slot());
 	play_button->name = string_compose ("playbutton %1", tr.slot());
 
 	set_trigger (tr);
-
-	trigger()->ArmChanged.connect (_rec_enable_connections, MISSING_INVALIDATOR, std::bind (&TriggerEntry::rec_enable_change, this), gui_context());
-	tref.box()->RecEnableChanged.connect (_rec_enable_connections, MISSING_INVALIDATOR, std::bind (&TriggerEntry::rec_enable_change, this), gui_context());
 
 	selection_change ();
 	rec_enable_change ();
@@ -195,14 +189,6 @@ TriggerEntry::set_play_button_tooltip ()
 		break;
 	default:
 		play_button->set_tooltip (_("Stop other clips on this track.\nRight-click to select Launch Options for this clip"));
-	}
-}
-
-void
-TriggerEntry::owner_prop_change (PropertyChange const& pc)
-{
-	if (pc.contains (Properties::color)) {
-		owner_color_changed ();
 	}
 }
 
@@ -635,21 +621,14 @@ TriggerEntry::set_widget_colors (TriggerEntry::EnteredState es)
 	}
 
 	/*preserve selection border*/
-	if (PublicEditor::instance ().get_selection ().selected (this)) {
+	_drawn_selected = PublicEditor::instance ().get_selection ().selected (this);
+	if (_drawn_selected) {
 		name_button->set_outline_color (UIConfiguration::instance ().color ("alert:red"));
 	}
 
 	/*draw a box around 'queued' trigger*/
 	if (!trigger ()->active () && trigger ()->box ().currently_playing () == trigger ()) {
 		play_button->set_outline_color (UIConfiguration::instance ().color ("neutral:foreground"));
-	}
-}
-
-void
-TriggerEntry::ui_parameter_changed (std::string const& p)
-{
-	if (p == "color-file") {
-		set_widget_colors ();
 	}
 }
 
@@ -969,6 +948,8 @@ TriggerBoxUI::TriggerBoxUI (ArdourCanvas::Item* parent, TriggerStrip& s, Trigger
 	: Rectangle (parent)
 	, _triggerbox (tb)
 	, _strip (s)
+	, _cue_row (-1)
+	, _cue_active (false)
 {
 	set_layout_sensitive (true); // why???
 
@@ -1001,6 +982,30 @@ TriggerBoxUI::TriggerBoxUI (ArdourCanvas::Item* parent, TriggerStrip& s, Trigger
 	gtkcanvas->signal_drag_motion ().connect (sigc::mem_fun (*this, &TriggerBoxUI::drag_motion));
 	gtkcanvas->signal_drag_leave ().connect (sigc::mem_fun (*this, &TriggerBoxUI::drag_leave));
 	gtkcanvas->signal_drag_data_received ().connect (sigc::mem_fun (*this, &TriggerBoxUI::drag_data_received));
+
+	/* Spite: what every row needs, connected once here instead of once per
+	 * row (see TriggerEntry). The box emits these from the audio thread.
+	 */
+	gtkcanvas->signal_drag_begin ().connect (sigc::mem_fun (*this, &TriggerBoxUI::drag_begin));
+	gtkcanvas->signal_drag_end ().connect (sigc::mem_fun (*this, &TriggerBoxUI::drag_end));
+	gtkcanvas->signal_drag_data_get ().connect (sigc::mem_fun (*this, &TriggerBoxUI::drag_data_get));
+
+	_triggerbox.PropertyChanged.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::box_property_changed, this, _1), gui_context ());
+	_triggerbox.TriggerSwapped.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::trigger_swapped, this, _1), gui_context ());
+	_triggerbox.RecEnableChanged.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::rec_enable_changed, this), gui_context ());
+
+	if (Stripable* owner = dynamic_cast<Stripable*> (_triggerbox.owner ())) {
+		owner->presentation_info ().Change.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::owner_prop_change, this, _1), gui_context ());
+	}
+
+	UIConfiguration::instance ().ParameterChanged.connect (sigc::mem_fun (*this, &TriggerBoxUI::ui_parameter_changed));
+
+	/* the audio thread's requests to the GUI go through a queue of fixed
+	 * size, and when a cue starts or stops clips on many tracks in the same
+	 * cycle some may be dropped: look again ten times a second, as
+	 * TriggerMaster does (this costs nothing while nothing changes)
+	 */
+	_cue_check_connection = Timers::rapid_connect (sigc::mem_fun (*this, &TriggerBoxUI::update_cue_rows));
 }
 
 TriggerBoxUI::~TriggerBoxUI ()
@@ -1009,13 +1014,165 @@ TriggerBoxUI::~TriggerBoxUI ()
 	   functor from the signal when they are destroyed).
 	*/
 	_selection_connection.disconnect ();
+	_cue_check_connection.disconnect ();
 }
 
 void
 TriggerBoxUI::selection_changed ()
 {
+	/* Spite: only the rows whose selection changed are redrawn; with many
+	 * scenes each track has hundreds of rows. The selection holds rows of
+	 * every track: they are compared, never dereferenced here.
+	 */
+	Selection const& sel (PublicEditor::instance ().get_selection ());
 	for (auto& slot : _slots) {
-		slot->selection_change ();
+		if (sel.selected (slot) != slot->drawn_selected ()) {
+			slot->selection_change ();
+		}
+	}
+}
+
+int32_t
+TriggerBoxUI::cue_row () const
+{
+	/* the row of the box's current (playing or queued) trigger */
+	TriggerPtr const cp (_triggerbox.currently_playing ());
+	if (!cp) {
+		return -1;
+	}
+	uint32_t const n = cp->index ();
+	return n < _slots.size () ? (int32_t) n : -1;
+}
+
+void
+TriggerBoxUI::update_cue_rows ()
+{
+	/* Spite: at most one trigger per box plays or waits to start, the
+	 * box's current one. A row shows it with its play button (filled while
+	 * it plays, outlined while it is queued, see TriggerEntry), so when the
+	 * current trigger or its state changes, only the row that showed it and
+	 * the one that shows it now are redone.
+	 */
+	TriggerPtr const cp (_triggerbox.currently_playing ());
+	int32_t const    now    = cue_row ();
+	bool const       active = cp && cp->active ();
+
+	if (now == _cue_row && active == _cue_active) {
+		return;
+	}
+
+	PropertyChange pc;
+	pc.add (Properties::running);
+	pc.add (Properties::currently_playing);
+
+	if (_cue_row >= 0 && _cue_row < (int32_t) _slots.size ()) {
+		_slots[_cue_row]->on_trigger_changed (pc);
+	}
+	if (now >= 0 && now != _cue_row) {
+		_slots[now]->on_trigger_changed (pc);
+	}
+	_cue_row    = now;
+	_cue_active = active;
+}
+
+void
+TriggerBoxUI::box_property_changed (PropertyChange const& what)
+{
+	/* Spite: the audio thread sends these whenever a clip starts, stops or
+	 * gets queued, see update_cue_rows ()
+	 */
+	PropertyChange rest (what);
+
+	if (what.contains (Properties::currently_playing) || what.contains (Properties::queued)) {
+		update_cue_rows ();
+		rest.erase (Properties::currently_playing.property_id);
+		rest.erase (Properties::queued.property_id);
+	}
+
+	if (!rest.empty ()) {
+		for (auto& slot : _slots) {
+			slot->on_trigger_changed (rest);
+		}
+	}
+}
+
+void
+TriggerBoxUI::trigger_swapped (uint32_t n)
+{
+	/* a newly loaded clip took the place of slot n's trigger */
+	if (n >= _slots.size ()) {
+		return;
+	}
+	_slots[n]->trigger_swapped ();
+	TriggerPtr const t (_triggerbox.trigger (n));
+	if (n < _shown.size ()) {
+		_shown[n] = t ? t.get () : 0;
+	}
+}
+
+void
+TriggerBoxUI::rec_enable_changed ()
+{
+	/* empty slots turn from stop buttons into record buttons, and back */
+	for (auto& slot : _slots) {
+		slot->rec_enable_change ();
+	}
+}
+
+void
+TriggerBoxUI::owner_prop_change (PropertyChange const& what)
+{
+	if (what.contains (Properties::color)) {
+		/* clips without a color of their own follow the track's */
+		for (auto& slot : _slots) {
+			slot->owner_color_changed ();
+		}
+	}
+}
+
+void
+TriggerBoxUI::ui_parameter_changed (std::string const& p)
+{
+	if (p == "color-file") {
+		for (auto& slot : _slots) {
+			slot->set_widget_colors ();
+		}
+	}
+}
+
+TriggerEntry*
+TriggerBoxUI::dragging_row () const
+{
+	/* a drag started on this canvas: the row it started from */
+	for (auto& slot : _slots) {
+		if (slot->drag_active ()) {
+			return slot;
+		}
+	}
+	return 0;
+}
+
+void
+TriggerBoxUI::drag_begin (Glib::RefPtr<Gdk::DragContext> const& context)
+{
+	if (TriggerEntry* row = dragging_row ()) {
+		row->drag_begin (context);
+	}
+}
+
+void
+TriggerBoxUI::drag_end (Glib::RefPtr<Gdk::DragContext> const& context)
+{
+	if (TriggerEntry* row = dragging_row ()) {
+		row->drag_end (context);
+	}
+}
+
+void
+TriggerBoxUI::drag_data_get (Glib::RefPtr<Gdk::DragContext> const& context, Gtk::SelectionData& data, guint info, guint time)
+{
+	if (TriggerEntry* row = dragging_row ()) {
+		row->drag_data_get (context, data, info, time);
 	}
 }
 
@@ -1075,6 +1232,11 @@ TriggerBoxUI::build ()
 			}
 		}
 	}
+
+	/* the rows were redone for their triggers, the current one included */
+	TriggerPtr const cp (_triggerbox.currently_playing ());
+	_cue_row    = cue_row ();
+	_cue_active = cp && cp->active ();
 
 	if (n > 0) {
 		/* lay the rows out */
@@ -1215,6 +1377,18 @@ TriggerBoxUI::drag_data_received (Glib::RefPtr<Gdk::DragContext> const& context,
 TriggerEntry*
 TriggerBoxUI::entry_by_trigger (Trigger const & trigger) const
 {
+	/* Spite: a trigger of another box is in none of our rows, and one of ours
+	 * is in the row of its index; each row looks its trigger up by slot.
+	 */
+	if (&trigger.box () != &_triggerbox) {
+		return nullptr;
+	}
+
+	uint32_t const n = trigger.index ();
+	if (n < _slots.size () && _slots[n]->trigger ().get () == &trigger) {
+		return _slots[n];
+	}
+
 	for (auto & slot : _slots) {
 		if (slot->trigger().get() == &trigger) {
 			return slot;

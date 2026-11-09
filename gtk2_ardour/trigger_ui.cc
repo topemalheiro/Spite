@@ -72,14 +72,14 @@ std::string              TriggerUI::longest_launch;
 std::vector<std::string> TriggerUI::stretch_mode_strings;
 std::string              TriggerUI::longest_stretch_mode;
 
-TriggerUI::TriggerUI ()
-	: _renaming (false)
-	, _file_chooser (0)
+TriggerUI::TriggerUI (bool box_signals)
+	: _file_chooser (0)
 	, _launch_context_menu (0)
 	, _follow_context_menu (0)
 	, _context_menu (0)
 	, _ignore_menu_action (false)
 	, _color_dialog (nullptr)
+	, _box_signals (box_signals)
 {
 	if (follow_strings.empty()) {
 		follow_strings.push_back (follow_action_to_string (FollowAction (FollowAction::None)));
@@ -135,12 +135,28 @@ TriggerUI::trigger_swap (uint32_t n)
 		/* some other slot in the same box got swapped. we don't care */
 		return;
 	}
+	trigger_swapped ();
+}
+
+void
+TriggerUI::trigger_swapped ()
+{
+	connect_to_trigger ();
+	trigger_changed (Properties::name);
+}
+
+void
+TriggerUI::connect_to_trigger ()
+{
 	trigger_connections.drop_connections ();
 
-	trigger()->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
-	tref.box()->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
-
-	trigger_changed (Properties::name);
+	TriggerPtr t (trigger ());
+	if (t) {
+		t->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
+	}
+	if (_box_signals) {
+		tref.box()->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
+	}
 }
 
 /* Spite: clip colors follow the track until the user picks one */
@@ -263,153 +279,6 @@ TriggerUI::sample_chosen (int response)
 	for (std::list<std::string>::iterator s = paths.begin (); s != paths.end (); ++s) {
 		trigger()->box().set_from_path (trigger()->index(), *s);
 	}
-}
-
-/* ****************************************************************************/
-
-bool
-TriggerUI::namebox_button_press (GdkEventButton* ev)
-{
-	if (_renaming) {
-		return false;
-	}
-	if ((ev->button == 1 && ev->type == GDK_2BUTTON_PRESS) || Keyboard::is_edit_event (ev)) {
-		start_rename ();
-		return true;
-	}
-	return false;
-}
-
-bool
-TriggerUI::start_rename ()
-{
-	if (_renaming) {
-		return false;
-	}
-	assert (_entry_connections.empty ());
-
-	GtkRequisition r (_name_label.size_request ());
-	_nameentry.set_size_request (r.width, -1);
-	_nameentry.set_text (trigger()->name ());
-	_namebox.remove ();
-	_namebox.add (_nameentry);
-	_nameentry.show ();
-	_nameentry.grab_focus ();
-	_nameentry.add_modal_grab ();
-	_renaming = true;
-
-	_entry_connections.push_back (_nameentry.signal_changed().connect (sigc::mem_fun (*this, &TriggerUI::entry_changed)));
-	_entry_connections.push_back (_nameentry.signal_activate().connect (sigc::mem_fun (*this, &TriggerUI::entry_activated)));
-	_entry_connections.push_back (_nameentry.signal_key_press_event().connect (sigc::mem_fun (*this, &TriggerUI::entry_key_press), false));
-	_entry_connections.push_back (_nameentry.signal_key_release_event().connect (sigc::mem_fun (*this, &TriggerUI::entry_key_release), false));
-	_entry_connections.push_back (_nameentry.signal_button_press_event ().connect (sigc::mem_fun (*this, &TriggerUI::entry_button_press), false));
-	_entry_connections.push_back (_nameentry.signal_focus_in_event ().connect (sigc::mem_fun (*this, &TriggerUI::entry_focus_in)));
-	_entry_connections.push_back (_nameentry.signal_focus_out_event ().connect (sigc::mem_fun (*this, &TriggerUI::entry_focus_out)));
-	return true;
-}
-
-void
-TriggerUI::end_rename (bool ignore_change)
-{
-	if (!_renaming) {
-		return;
-	}
-	std::string result = _nameentry.get_text ();
-	disconnect_entry_signals ();
-	_nameentry.remove_modal_grab ();
-	_namebox.remove ();
-	_namebox.add (_name_label);
-	_name_label.show ();
-	_renaming = false;
-
-	if (ignore_change) {
-		return;
-	}
-
-	trigger()->set_name (result);
-}
-
-void
-TriggerUI::entry_changed ()
-{
-}
-
-void
-TriggerUI::entry_activated ()
-{
-	end_rename (false);
-}
-
-bool
-TriggerUI::entry_focus_in (GdkEventFocus*)
-{
-	return false;
-}
-
-bool
-TriggerUI::entry_focus_out (GdkEventFocus*)
-{
-	end_rename (false);
-	return false;
-}
-
-bool
-TriggerUI::entry_button_press (GdkEventButton* ev)
-{
-	if (Keyboard::is_context_menu_event (ev)) {
-		return false;
-	} else if (Gtkmm2ext::event_inside_widget_window (_namebox, (GdkEvent*) ev)) {
-		return false;
-	} else {
-		end_rename (false);
-		return false;
-	}
-}
-
-bool
-TriggerUI::entry_key_press (GdkEventKey* ev)
-{
-	switch (ev->keyval) {
-		case GDK_Escape:
-			[[fallthrough]];
-		case GDK_ISO_Left_Tab:
-			[[fallthrough]];
-		case GDK_Tab:
-			return true;
-		default:
-			break;
-	}
-	return false;
-}
-
-bool
-TriggerUI::entry_key_release (GdkEventKey* ev)
-{
-	switch (ev->keyval) {
-		case GDK_Escape:
-			end_rename (true);
-			return true;
-		case GDK_ISO_Left_Tab:
-			end_rename (false);
-//			EditNextName (this, false); /* TODO */
-			return true;
-		case GDK_Tab:
-			end_rename (false);
-//			EditNextName (this, true); /* TODO */
-			return true;
-		default:
-			break;
-	}
-	return false;
-}
-
-void
-TriggerUI::disconnect_entry_signals ()
-{
-	for (std::list<sigc::connection>::iterator i = _entry_connections.begin(); i != _entry_connections.end(); ++i) {
-		i->disconnect ();
-	}
-	_entry_connections.clear ();
 }
 
 /* ****************************************************************************/
@@ -846,10 +715,11 @@ TriggerUI::set_trigger (ARDOUR::TriggerReference tr)
 
 	trigger_changed (TriggerBox::all_trigger_props());
 
-	trigger()->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context());
-	tref.box()->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
+	connect_to_trigger ();
 
-	tref.box()->TriggerSwapped.connect (trigger_swap_connection, invalidator (*this), std::bind (&TriggerUI::trigger_swap, this, _1), gui_context ());
+	if (_box_signals) {
+		tref.box()->TriggerSwapped.connect (trigger_swap_connection, invalidator (*this), std::bind (&TriggerUI::trigger_swap, this, _1), gui_context ());
+	}
 
 	if (_color_dialog) {
 		if (trigger()) {

@@ -28,6 +28,7 @@
 #include "gtkmm2ext/utils.h"
 #include "gtkmm2ext/menu_elems.h"
 
+#include "widgets/frame.h"
 #include "widgets/tooltips.h"
 
 #include "ardour/audioregion.h"

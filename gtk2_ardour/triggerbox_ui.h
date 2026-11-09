@@ -47,6 +47,14 @@ namespace ArdourCanvas
 
 class TriggerStrip;
 
+/* Spite: one row of the clip grid, one per scene and track. Its box's
+ * signals (PropertyChanged, TriggerSwapped, RecEnableChanged), its track's
+ * color, the theme and the canvas's drag signals reach it through its
+ * TriggerBoxUI, which connects to each of them once: the engine emits the
+ * box's signals from the audio thread, and a PBD::Signal's emission costs
+ * O(subscribers^2), so one subscriber per scene made every clip start and
+ * stop take milliseconds there with hundreds of scenes.
+ */
 class TriggerEntry : public ArdourCanvas::Rectangle, public TriggerUI
 {
 public:
@@ -61,7 +69,14 @@ public:
 	ArdourCanvas::Rectangle* follow_button;
 	ArdourCanvas::Text*      name_text;
 
-	void box_rec_enable_changed ();
+	/* Spite: relayed by TriggerBoxUI */
+	void rec_enable_change ();
+	void owner_color_changed ();
+	bool drag_active () const { return _drag_active; }
+	void drag_begin (Glib::RefPtr<Gdk::DragContext> const&);
+	void drag_end (Glib::RefPtr<Gdk::DragContext> const&);
+	void drag_data_get (Glib::RefPtr<Gdk::DragContext> const&, Gtk::SelectionData&, guint, guint);
+	bool drawn_selected () const { return _drawn_selected; }
 
 	void draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float size, float scale) const;
 	void draw_follow_icon (Cairo::RefPtr<Cairo::Context> context, ARDOUR::FollowAction const & icon, float size, float scale) const;
@@ -95,30 +110,22 @@ private:
 	int  _drag_start_y;
 	bool _drag_active;
 	bool  rec_blink_on;
+	bool _drawn_selected; /* Spite: drawn with the selection's border */
 
 	bool event (GdkEvent*);
-	void drag_begin (Glib::RefPtr<Gdk::DragContext> const&);
-	void drag_end (Glib::RefPtr<Gdk::DragContext> const&);
-	void drag_data_get (Glib::RefPtr<Gdk::DragContext> const&, Gtk::SelectionData&, guint, guint);
 
-	void ui_parameter_changed (std::string const& p);
+	void connect_to_trigger () override; /* TriggerUI's, and the trigger's ArmChanged */
 
 	bool play_button_event (GdkEvent*);
 	bool follow_button_event (GdkEvent*);
 
-	void owner_prop_change (PBD::PropertyChange const&);
-	void owner_color_changed ();
-	void rec_enable_change ();
 	void set_play_button_tooltip ();
 	Gtkmm2ext::Color bg_color () const;
 	void blink_rec_enable (bool);
 	sigc::connection rec_blink_connection;
-
-	PBD::ScopedConnection _owner_prop_connection;
-	PBD::ScopedConnectionList _rec_enable_connections;
 };
 
-class TriggerBoxUI : public ArdourCanvas::Rectangle
+class TriggerBoxUI : public ArdourCanvas::Rectangle, public sigc::trackable
 {
 public:
 	TriggerBoxUI (ArdourCanvas::Item* parent, TriggerStrip&, ARDOUR::TriggerBox&);
@@ -158,6 +165,26 @@ private:
 	uint64_t slot_at_y (int) const;
 
 	sigc::connection _selection_connection;
+
+	/* Spite: the box's signals, the track's color, the theme and the
+	 * canvas's drag signals, for all rows (see TriggerEntry)
+	 */
+	PBD::ScopedConnectionList _box_connections;
+	sigc::connection          _cue_check_connection;
+	int32_t                   _cue_row;    /* the row of the box's current trigger, as drawn */
+	bool                      _cue_active; /* whether that trigger was drawn playing */
+
+	void box_property_changed (PBD::PropertyChange const&);
+	void update_cue_rows ();
+	void trigger_swapped (uint32_t slot);
+	void rec_enable_changed ();
+	void owner_prop_change (PBD::PropertyChange const&);
+	void ui_parameter_changed (std::string const&);
+	int32_t cue_row () const;
+	TriggerEntry* dragging_row () const;
+	void drag_begin (Glib::RefPtr<Gdk::DragContext> const&);
+	void drag_end (Glib::RefPtr<Gdk::DragContext> const&);
+	void drag_data_get (Glib::RefPtr<Gdk::DragContext> const&, Gtk::SelectionData&, guint, guint);
 };
 
 class TriggerBoxWidget : public FittedCanvasWidget
