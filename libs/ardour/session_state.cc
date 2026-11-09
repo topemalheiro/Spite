@@ -141,7 +141,9 @@
 #include "ardour/source_factory.h"
 #include "ardour/speakers.h"
 #include "ardour/template_utils.h"
+#include "ardour/scene_command.h"
 #include "ardour/tempo.h"
+#include "ardour/triggerbox.h"
 #include "ardour/ticker.h"
 #include "ardour/transport_master_manager.h"
 #include "ardour/types_convert.h"
@@ -1863,6 +1865,7 @@ Session::state (SessionSaveDisposition ssd, snapshot_t snapshot_type) const
 	PBD::Unwinder<bool> uw (Automatable::skip_saving_automation, save_template);
 
 	node->set_property("version", CURRENT_SESSION_FILE_VERSION);
+	node->set_property (X_("scenes"), _scene_count); /* Spite */
 
 	child = node->add_child ("ProgramVersion");
 	child->set_property("created-with", created_with);
@@ -2390,6 +2393,13 @@ Session::set_state (const XMLNode& node, int version)
 	}
 
 	node.get_property ("name", _name);
+
+	/* Spite: the scene count. Sessions from before have none: their trigger
+	 * boxes have 16 slots, and sync_scenes () keeps them all.
+	 */
+	if (node.get_property (X_("scenes"), _scene_count)) {
+		_scene_count = std::max<uint32_t> (1, std::min<uint32_t> (_scene_count, TriggerBox::max_triggers_per_box));
+	}
 
 	if (node.get_property (X_("sample-rate"), _base_sample_rate)) {
 
@@ -4967,6 +4977,8 @@ Session::restore_history (string snapshot_name)
 					if ((c = stateful_diff_command_factory (n))) {
 						ut->add_command (c);
 					}
+				} else if (n->name() == "SceneCommand") { /* Spite */
+					ut->add_command (new SceneCommand (*this, *n));
 				} else {
 					error << string_compose(_("Couldn't figure out how to make a Command out of a %1 XMLNode."), n->name()) << endmsg;
 				}

@@ -209,6 +209,7 @@ libardour_sources = [
         'scale.cc',
         'scale_provider.cc',
         'scene_change.cc',
+        'scene_command.cc',
         'search_paths.cc',
         'segment_descriptor.cc',
         'selection.cc',

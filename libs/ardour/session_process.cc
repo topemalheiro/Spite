@@ -1750,6 +1750,145 @@ Session::trigger_cue_row (int32_t cue)
 	request_transport_speed (1.0);
 }
 
+/* Spite: scenes, see session.h */
+
+bool
+Session::insert_scene (uint32_t at)
+{
+	if (_scene_count >= (uint32_t) TriggerBox::max_triggers_per_box) {
+		return false;
+	}
+
+	at = std::min (at, _scene_count);
+
+	{
+		/* the RT thread reads the slots without a lock */
+		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
+		std::shared_ptr<RouteList const> rl = routes.reader ();
+		for (auto const & r : *rl) {
+			std::shared_ptr<TriggerBox> tb = r->triggerbox ();
+			if (tb) {
+				tb->insert_slot (at);
+			}
+		}
+		++_scene_count;
+		int32_t const c = _active_cue.load ();
+		if (c >= (int32_t) at && c != CueRecord::stop_all) {
+			_active_cue.store (c + 1);
+		}
+	}
+
+	shift_cue_markers (at, 1);
+	set_dirty ();
+	SceneCountChanged (); /* EMIT SIGNAL */
+	return true;
+}
+
+bool
+Session::scene_removable (uint32_t at) const
+{
+	if (at >= _scene_count || _scene_count < 2) {
+		return false;
+	}
+	std::shared_ptr<RouteList const> rl = routes.reader ();
+	for (auto const & r : *rl) {
+		std::shared_ptr<TriggerBox> tb = r->triggerbox ();
+		if (tb && at < tb->n_triggers () && !tb->slot_removable (at)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool
+Session::remove_scene (uint32_t at)
+{
+	{
+		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
+		if (!scene_removable (at)) {
+			return false;
+		}
+		std::shared_ptr<RouteList const> rl = routes.reader ();
+		for (auto const & r : *rl) {
+			std::shared_ptr<TriggerBox> tb = r->triggerbox ();
+			if (tb) {
+				tb->remove_slot (at);
+			}
+		}
+		--_scene_count;
+		int32_t const c = _active_cue.load ();
+		if (c != CueRecord::stop_all) {
+			if (c > (int32_t) at) {
+				_active_cue.store (c - 1);
+			} else if (c == (int32_t) at) {
+				_active_cue.store (-1);
+			}
+		}
+	}
+
+	shift_cue_markers (at, -1);
+	set_dirty ();
+	SceneCountChanged (); /* EMIT SIGNAL */
+	return true;
+}
+
+void
+Session::shift_cue_markers (uint32_t at, int delta)
+{
+	/* cue markers name scenes by number: keep them on the same scenes. A
+	 * marker on a removed (empty) scene stopped every clip, so it becomes a
+	 * "stop all cues" marker, which does just that.
+	 */
+	Locations::LocationList ll (_locations->list ());
+	for (auto const & loc : ll) {
+		if (!loc->is_cue_marker ()) {
+			continue;
+		}
+		int32_t const c = loc->cue_id ();
+		if (c == CueRecord::stop_all || c < (int32_t) at) {
+			continue;
+		}
+		if (delta < 0 && c == (int32_t) at) {
+			loc->set_cue_id (CueRecord::stop_all);
+		} else {
+			loc->set_cue_id (c + delta);
+		}
+	}
+}
+
+void
+Session::sync_scenes ()
+{
+	/* the box with most slots sets the count, so no clip is ever dropped;
+	 * the others get empty slots. Sessions from before Spite had scenes
+	 * have 16 slots, and keep them.
+	 */
+	uint32_t n = std::max<uint32_t> (_scene_count, 1);
+	std::shared_ptr<RouteList const> rl = routes.reader ();
+	for (auto const & r : *rl) {
+		std::shared_ptr<TriggerBox> tb = r->triggerbox ();
+		if (tb) {
+			n = std::max (n, tb->n_triggers ());
+		}
+	}
+	n = std::min<uint32_t> (n, TriggerBox::max_triggers_per_box);
+
+	{
+		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
+		for (auto const & r : *rl) {
+			std::shared_ptr<TriggerBox> tb = r->triggerbox ();
+			if (tb && tb->n_triggers () < n) {
+				tb->add_slots_to (n);
+			}
+		}
+	}
+
+	if (n != _scene_count) {
+		_scene_count = n;
+		SceneCountChanged (); /* EMIT SIGNAL */
+	}
+}
+
 
 bool
 Session::bang_trigger_at (int32_t route_index, int32_t row_index, float velocity)

@@ -1428,6 +1428,20 @@ public:
 
 	int32_t first_cue_within (samplepos_t s, samplepos_t e, bool& was_recorded);
 	void trigger_cue_row (int32_t);
+
+	/* Spite: scenes. Every track's trigger box has scene_count () slots.
+	 * Saved with the session; a new session has
+	 * TriggerBox::default_triggers_per_box, and at most
+	 * TriggerBox::max_triggers_per_box. insert_scene () adds an empty
+	 * scene before `at` (scene_count () appends); remove_scene () removes
+	 * only an empty one. Cue markers stay on their scenes. Both return
+	 * false when nothing changed. See also SceneCommand, for undo.
+	 */
+	uint32_t scene_count () const { return _scene_count; }
+	bool insert_scene (uint32_t at);
+	bool scene_removable (uint32_t at) const;
+	bool remove_scene (uint32_t at);
+	PBD::Signal<void()> SceneCountChanged;
 	CueEvents const & cue_events() const { return _cue_events; }
 
 	int num_triggerboxes () const;
@@ -2475,6 +2489,9 @@ private:
 
 	std::atomic<int32_t> _pending_cue;
 	std::atomic<int32_t> _active_cue;
+	uint32_t _scene_count; /* Spite */
+	void sync_scenes ();
+	void shift_cue_markers (uint32_t at, int delta);
 	void maybe_find_pending_cue ();
 	void clear_active_cue ();
 

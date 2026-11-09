@@ -179,6 +179,8 @@
       </menu>
 
       <menu action="CueMenu">
+        <menuitem action='insert-scene'/>
+        <separator/>
         <menuitem action='trigger-cue-0'/>
         <menuitem action='trigger-cue-1'/>
         <menuitem action='trigger-cue-2'/>

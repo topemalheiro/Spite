@@ -150,8 +150,17 @@ TriggerPage::TriggerPage ()
 	 * plain column instead (see set_session).
 	 */
 	_strip_group_box.pack_start (_strip_scroller, true, true);
-	_strip_group_box.pack_start (_cue_area_frame, false, false);
-	_strip_group_box.pack_start (_master_align, false, false);
+	_master_column.pack_start (_cue_area_frame, false, false);
+	_master_column.pack_start (_master_align, false, false);
+	_master_viewport = manage (new Gtk::Viewport (*manage (new Gtk::Adjustment (0, 0, 1)), *manage (new Gtk::Adjustment (0, 0, 1))));
+	_master_viewport->set_shadow_type (Gtk::SHADOW_NONE);
+	_master_viewport->add (_master_column);
+	_master_viewport->set_size_request (-1, 1); /* the strips decide the height */
+	_strip_group_box.pack_start (*_master_viewport, false, false);
+	_master_column.show ();
+	_master_viewport->show ();
+	_strip_scroller.get_vadjustment ()->signal_value_changed ().connect (sigc::mem_fun (*this, &TriggerPage::sync_master_scroll));
+	_strip_scroller.get_vadjustment ()->signal_changed ().connect (sigc::mem_fun (*this, &TriggerPage::sync_master_scroll));
 	_strip_scroller.signal_size_allocate ().connect (sigc::hide (sigc::mem_fun (*this, &TriggerPage::queue_align_master_column)));
 
 	/* sidebar */
@@ -1421,7 +1430,10 @@ TriggerPage::register_actions ()
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot-alt", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 
-	for (int32_t n = 0; n < TriggerBox::default_triggers_per_box; ++n) {
+	/* Spite: actions for as many scenes as a session can have; slot actions
+	 * for the first 16 rows, as before scenes could be added
+	 */
+	for (int32_t n = 0; n < TriggerBox::max_triggers_per_box; ++n) {
 		const std::string action_name  = string_compose ("trigger-cue-%1", n);
 		const std::string display_name = string_compose (_("Trigger Cue %1"), cue_marker_name (n));
 
@@ -1429,7 +1441,7 @@ TriggerPage::register_actions ()
 	}
 
 	for (int32_t c = 0; c < 16; ++c) {
-		for (int32_t n = 0; n < TriggerBox::default_triggers_per_box; ++n) {
+		for (int32_t n = 0; n < 16; ++n) {
 			const std::string action_name  = string_compose ("trigger-slot-%1-%2", c, n);
 			const std::string display_name = string_compose (_("Trigger Slot %1/%2"), c, cue_marker_name (n));
 
@@ -1495,6 +1507,20 @@ TriggerPage::queue_align_master_column ()
 	}
 	_align_queued = true;
 	Glib::signal_idle ().connect (sigc::bind_return (sigc::mem_fun (*this, &TriggerPage::align_master_column), false));
+}
+
+void
+TriggerPage::sync_master_scroll ()
+{
+	/* Spite: the master column scrolls with the strips, so the scene column
+	 * stays level with the clip rows
+	 */
+	Gtk::Adjustment* sa = _strip_scroller.get_vadjustment ();
+	Gtk::Adjustment* ma = _master_viewport->get_vadjustment ();
+	double const v = std::min (sa->get_value (), std::max (0., ma->get_upper () - ma->get_page_size ()));
+	if (ma->get_value () != v) {
+		ma->set_value (v);
+	}
 }
 
 void

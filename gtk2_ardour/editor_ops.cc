@@ -4125,7 +4125,7 @@ Editor::bounce_range_selection (BounceTarget target, bool with_processing)
 
 			ArdourWidgets::ArdourDropdown *tslot = manage (new ArdourWidgets::ArdourDropdown ());
 
-			for (int c = 0; c < TriggerBox::default_triggers_per_box; ++c) {
+			for (int c = 0; c < (int) _session->scene_count (); ++c) { /* Spite: one per scene */
 				std::string lbl = cue_marker_name (c);
 				tslot->add_menu_elem (Menu_Helpers::MenuElem (lbl, sigc::bind ([] (uint32_t* t, uint32_t v, ArdourWidgets::ArdourDropdown* s, std::string l) {*t = v; s->set_text (l);}, &trigger_slot, c, tslot, lbl)));
 			}

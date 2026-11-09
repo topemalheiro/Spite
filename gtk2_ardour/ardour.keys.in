@@ -179,11 +179,11 @@ This mode provides many different operations on both regions and control points,
 @gselect|Common/select-all-visible-lanes|                   <@PRIMARY@>t|select all visible lanes
 @mmode|Editing/set-mouse-mode-grid|                                     y|grid mode
 @editing|Editing/alternate-redo|                             <@PRIMARY@>y|redo
-@select|Editor/select-all-between-cursors|                  <@PRIMARY@>u|select all regions enclosed by Range
 @select|Editor/select-all-within-cursors|                              u|select all regions touched by Range
 @rop|Region/fork-regions-from-unselected|                  <@TERTIARY@>u|unlink midi from unselected regions
 @eep|Region/insert-region-from-source-list|                            i|insert from region list
-@sess|Common/addExistingAudioFiles|                         <@PRIMARY@>i|import audio files
+@sess|Common/addExistingAudioFiles|                         <@PRIMARY@>u|import audio files
+@gedt|Common/insert-scene|                                 <@PRIMARY@>i|insert a scene below the selected one
 @gselect|Common/invert-selection|               <@PRIMARY@><@TERTIARY@>i|invert selection
 @edtrk|Editor/toggle-midi-input-active|                   <@SECONDARY@>i|toggle sel. track MIDI input
 @sess|Main/Open|                                            <@PRIMARY@>o|open an existing session

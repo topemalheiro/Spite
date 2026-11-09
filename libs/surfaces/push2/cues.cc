@@ -341,23 +341,36 @@ CueLayout::button_up ()
 void
 CueLayout::button_octave_up ()
 {
-	if (scene_base > 8) {
-		scene_base -= 8;
+	if (scene_base > 0) {
+		scene_base = std::max (0, (int) scene_base - 8);
 		viewport_changed ();
 	}
+}
+
+/* Spite: the pads show 8 scenes; scroll no further than the session's last */
+static int
+last_scene_base (Push2& p2)
+{
+	return std::max (0, (int) p2.get_session ().scene_count () - 8);
 }
 
 void
 CueLayout::button_down ()
 {
-	scene_base++;
-	viewport_changed ();
+	if ((int) scene_base < last_scene_base (_p2)) {
+		scene_base++;
+		viewport_changed ();
+	}
 }
 
 void
 CueLayout::button_octave_down ()
 {
-	scene_base++;
+	int const b = std::min ((int) scene_base + 8, last_scene_base (_p2));
+	if (b != (int) scene_base) {
+		scene_base = b;
+		viewport_changed ();
+	}
 }
 
 void
@@ -961,7 +974,7 @@ FollowActionIcon::render (ArdourCanvas::Rect const & area, Cairo::RefPtr<Cairo::
 	case FollowAction::JumpTrigger:
 		if (trigger->follow_action0().targets.count() == 1 ) {  //Jump to a specific row; just draw the letter of the row we are jumping to
 			int cue_idx = -1;
-			for (int i = 0; i < TriggerBox::default_triggers_per_box; i++) {
+			for (int i = 0; i < (int) trigger->follow_action0().targets.size (); i++) {
 				if (trigger->follow_action0().targets.test(i)) {
 					cue_idx = i;
 					break;

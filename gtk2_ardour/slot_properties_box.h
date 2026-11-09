@@ -115,6 +115,11 @@ class SlotPropertyTable : public TriggerUI, public Gtk::Table
 	void set_launch_style (ARDOUR::Trigger::LaunchStyle);
 	void set_follow_action (ARDOUR::FollowAction const &, uint64_t);
 
+	/* Spite: one "Jump" entry per scene; refilled for a box with another count */
+	Gtk::Menu* _jump_menu[2];
+	uint32_t   _jump_menu_rows;
+	void       fill_jump_menus (uint32_t n_scenes);
+
 	void on_trigger_changed (PBD::PropertyChange const& );
 
 	bool allow_button_event (GdkEvent*);

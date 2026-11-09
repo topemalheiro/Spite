@@ -332,6 +332,17 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	virtual bool playable() const = 0;
 
 	uint32_t index() const { return _index; }
+	/* Spite: scenes can be inserted and removed, which renumbers the slots
+	 * after them. Only call with the process lock held (or from the RT thread
+	 * on a trigger it is swapping in).
+	 */
+	void set_index (uint32_t n) { _index = n; }
+	/* Spite: a region is being loaded into this slot */
+	bool has_pending () const { return _pending.load () != 0; }
+	/* Spite: follow-action targets name slots: move the ones at or after
+	 * `at` by `delta` slots (a scene inserted or removed at `at`)
+	 */
+	void shift_follow_targets (uint32_t at, int delta);
 
 	/* Managed by TriggerBox, these record the time that the trigger is
 	 * scheduled to start or stop at. Computed in
@@ -866,11 +877,14 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 {
   public:
 
-#ifdef MIXBUS
+	/* Spite: the number of slots is the session's scene count
+	 * (Session::scene_count()), which every trigger box follows. A new
+	 * session starts with default_triggers_per_box. max_triggers_per_box is
+	 * the limit, because follow actions name their target slots in a 64-bit
+	 * set (FollowAction::Targets).
+	 */
 	static const int32_t default_triggers_per_box = 8;
-#else
-	static const int32_t default_triggers_per_box = 16;
-#endif
+	static const int32_t max_triggers_per_box = 64;
 
 	TriggerBox (Session&, DataType dt);
 	~TriggerBox ();
@@ -915,6 +929,15 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	void unbang_trigger_at (Triggers::size_type row);
 
 	void add_trigger (TriggerPtr);
+
+	/* Spite: scenes. All of these need the process lock held, as the RT
+	 * thread reads the slots without a lock.
+	 */
+	uint32_t n_triggers () const;
+	void insert_slot (uint32_t at);
+	bool slot_removable (uint32_t at) const;
+	void remove_slot (uint32_t at);
+	void add_slots_to (uint32_t n);
 
 	void fast_forward (CueEvents const &, samplepos_t transport_position);
 	bool fast_forwarding() const { return _fast_forwarding; }

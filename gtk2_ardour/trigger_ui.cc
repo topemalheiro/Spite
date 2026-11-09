@@ -618,7 +618,8 @@ TriggerUI::follow_context_menu (GdkEventButton* ev)
 	Menu*     jump_menu = manage (new Menu);
 	MenuList& jitems      = jump_menu->items ();
 	jitems.push_back (MenuElem (_("Multi..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::edit_jump), false)));
-	for (int i = 0; i < TriggerBox::default_triggers_per_box; i++) {
+	uint32_t const n_scenes = tref.box () ? tref.box ()->n_triggers () : TriggerBox::default_triggers_per_box; /* Spite */
+	for (uint32_t i = 0; i < n_scenes; i++) {
 		FollowAction jump_fa = (FollowAction::JumpTrigger);
 		jump_fa.targets.set(i);
 		jitems.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &TriggerUI::set_follow_action), jump_fa)));
@@ -794,7 +795,7 @@ TriggerUI::follow_action_to_string (FollowAction const & fa, bool with_targets)
 
 	/* Jump case, and target(s) are desired */
 	if ( fa.targets.count() == 1 ) {  //jump to a specific row
-		for (int i = 0; i < TriggerBox::default_triggers_per_box; i++) {
+		for (int i = 0; i < (int) fa.targets.size (); i++) {
 			if (fa.targets.test(i)) {
 				return string_compose (_("Jump to: %1"), cue_marker_name (i));
 			}

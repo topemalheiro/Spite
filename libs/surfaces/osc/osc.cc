@@ -3174,7 +3174,7 @@ OSC::trigger_bank_state (lo_address addr)
 	lo_message bank_msg = lo_message_new ();
 	lo_message_add_int32 (bank_msg, session->num_triggerboxes());  //total avail routes (with triggers)
 	lo_message_add_int32 (bank_msg, _tbank_start_route);  //route start offs
-	lo_message_add_int32 (bank_msg, TriggerBox::default_triggers_per_box);  //total avail triggers
+	lo_message_add_int32 (bank_msg, session->scene_count ());  //total avail triggers (Spite: one per scene)
 	lo_message_add_int32 (bank_msg, _tbank_start_row);  //trigger start offs
 	lo_send_message (addr, X_("/trigger_grid/bank"), bank_msg);
 	lo_message_free (bank_msg);

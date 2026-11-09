@@ -16,6 +16,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <algorithm>
 #include <vector>
 
 #include "ytkmm/sizegroup.h"
@@ -273,7 +274,7 @@ TriggerEntry::draw_follow_icon (Cairo::RefPtr<Cairo::Context> context, FollowAct
 		case FollowAction::JumpTrigger: {
 			if ( icon.targets.count() == 1 ) {  //Jump to a specific row; just draw the letter of the row we are jumping to
 				int cue_idx = -1;
-				for (int i = 0; i < TriggerBox::default_triggers_per_box; i++) {
+				for (int i = 0; i < (int) icon.targets.size (); i++) {
 					if (icon.targets.test(i)) {
 						cue_idx = i;
 						break;
@@ -1004,7 +1005,26 @@ TriggerBoxUI::build ()
 	TriggerPtr t;
 	uint64_t   n = 0;
 
-	// clear_items (true);
+	/* Spite: rebuilt when scenes are inserted or removed. The editor's
+	 * selection holds the entries themselves: deselect them first (all of
+	 * them, as each change runs selection_changed () over _slots), then
+	 * select the same clips again in their new rows.
+	 */
+	Selection&              sel (PublicEditor::instance ().get_selection ());
+	std::vector<TriggerPtr> was_selected;
+	for (auto& slot : _slots) {
+		if (sel.selected (slot)) {
+			was_selected.push_back (slot->trigger ());
+		}
+	}
+	for (auto& slot : _slots) {
+		if (sel.selected (slot)) {
+			sel.remove (slot);
+		}
+	}
+	for (auto& slot : _slots) {
+		delete slot;
+	}
 
 	_slots.clear ();
 
@@ -1019,6 +1039,20 @@ TriggerBoxUI::build ()
 
 		++n;
 	}
+
+	for (auto& slot : _slots) {
+		if (std::find (was_selected.begin (), was_selected.end (), slot->trigger ()) != was_selected.end ()) {
+			sel.add (slot);
+		}
+	}
+
+	if (n > 0) {
+		/* lay the new rows out */
+		ArdourCanvas::Rect const r (get ());
+		if (r.height () > 0) {
+			_size_allocate (r);
+		}
+	}
 }
 
 void
@@ -1029,7 +1063,7 @@ TriggerBoxUI::_size_allocate (ArdourCanvas::Rect const& alloc)
 	const float width  = alloc.width ();
 	const float height = alloc.height ();
 
-	const float slot_h = height / TriggerBox::default_triggers_per_box; // TODO
+	const float slot_h = height / std::max<size_t> (1, _slots.size ()); /* Spite: one row per scene */
 
 	float ypos = 0;
 	for (auto& slot : _slots) {
@@ -1185,5 +1219,21 @@ TriggerBoxWidget::set_triggerbox (TriggerBox* tb)
 	}
 
 	_ui = new TriggerBoxUI (root (), _strip, *tb);
+
+	/* Spite: one row per scene */
+	set_nominal_height (tb->n_triggers () * slot_height ());
+	tb->session ().SceneCountChanged.connect (_scene_connection, invalidator (*this), std::bind (&TriggerBoxWidget::scenes_changed, this), gui_context ());
+
+	repeat_size_allocation ();
+}
+
+void
+TriggerBoxWidget::scenes_changed ()
+{
+	if (!_ui) {
+		return;
+	}
+	_ui->build ();
+	set_nominal_height (_ui->triggerbox ().n_triggers () * slot_height ());
 	repeat_size_allocation ();
 }

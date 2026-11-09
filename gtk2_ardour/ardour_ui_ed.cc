@@ -78,6 +78,7 @@
 #include "location_ui.h"
 #include "main_clock.h"
 #include "rc_option_editor.h"
+#include "scene_actions.h"
 #include "rta_manager.h"
 #include "rta_window.h"
 #include "virtual_keyboard_window.h"
@@ -649,6 +650,11 @@ ARDOUR_UI::install_dependent_actions ()
 	ActionManager::session_sensitive_actions.push_back (act);
 
 	act = ActionManager::register_action (common_actions, X_("addExistingAudioFiles"), _("Import Audio/MIDI files..."), sigc::mem_fun (*editor, &PublicEditor::external_audio_dialog));
+	ActionManager::session_sensitive_actions.push_back (act);
+	ActionManager::write_sensitive_actions.push_back (act);
+
+	/* Spite: Live's Insert Scene (Ctrl+I) */
+	act = ActionManager::register_action (common_actions, X_("insert-scene"), _("Insert Scene"), sigc::ptr_fun (&SceneActions::insert_scene));
 	ActionManager::session_sensitive_actions.push_back (act);
 	ActionManager::write_sensitive_actions.push_back (act);
 

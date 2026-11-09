@@ -484,8 +484,9 @@ void
 BasicUI::tbank_step_rows (int step_size)
 {
 	_tbank_start_row += step_size;
-	if (_tbank_start_row + _tbank_row_height > TriggerBox::default_triggers_per_box ) {
-		_tbank_start_row=TriggerBox::default_triggers_per_box - _tbank_row_height;
+	int const n_scenes = session->scene_count (); /* Spite: scenes can be added */
+	if (_tbank_start_row + _tbank_row_height > n_scenes ) {
+		_tbank_start_row=n_scenes - _tbank_row_height;
 	}
 	if (_tbank_start_row < 0) {
 		_tbank_start_row=0;

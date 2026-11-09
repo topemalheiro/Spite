@@ -42,6 +42,7 @@
 #include "gui_thread.h"
 #include "public_editor.h"
 #include "region_view.h"
+#include "scene_actions.h"
 #include "selection.h"
 #include "timers.h"
 #include "trigger_ui.h"
@@ -255,7 +256,7 @@ CueBoxUI::context_menu (GdkEventButton* ev, uint64_t idx)
 	fitems.push_back (MenuElem (TriggerUI::follow_action_to_string(FollowAction (FollowAction::ForwardTrigger)), sigc::bind (sigc::mem_fun (*this, &CueBoxUI::set_all_follow_action), FollowAction (FollowAction::ForwardTrigger), idx)));
 		Menu*     jump_menu = manage (new Menu);
 		MenuList& jitems      = jump_menu->items ();
-		for (int i = 0; i < TriggerBox::default_triggers_per_box; i++) {
+		for (int i = 0; i < (int) _slots.size (); i++) {
 			FollowAction jump_fa = (FollowAction::JumpTrigger);
 			jump_fa.targets.set(i);
 			jitems.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &CueBoxUI::set_all_follow_action), jump_fa, idx)));
@@ -305,6 +306,13 @@ CueBoxUI::context_menu (GdkEventButton* ev, uint64_t idx)
 	items.push_back (SeparatorElem());
 	items.push_back (MenuElem (_("Clear All..."), sigc::bind (sigc::mem_fun (*this, &CueBoxUI::clear_all_triggers), idx)));
 
+	/* Spite: scenes, like Live's */
+	items.push_back (SeparatorElem());
+	items.push_back (MenuElem (_("Insert Scene"), sigc::bind (sigc::ptr_fun (&SceneActions::insert_scene_at), idx + 1)));
+	items.back ().set_sensitive (_session && _session->scene_count () < (uint32_t) TriggerBox::max_triggers_per_box);
+	items.push_back (MenuElem (_("Delete Scene"), sigc::bind (sigc::ptr_fun (&SceneActions::delete_scene), idx)));
+	items.back ().set_sensitive (SceneActions::can_delete_scene (idx));
+
 	_context_menu->popup (ev->button, gtk_get_current_event_time ());
 }
 
@@ -317,7 +325,9 @@ CueBoxUI::get_slots (TriggerList &triggerlist, uint64_t idx)
 		// TODO: disambiguate processor *active* vs *visibility* ?
 		if (box /*&& box.active*/) {
 			TriggerPtr trigger = box->trigger(idx);
-			triggerlist.push_back(trigger);
+			if (trigger) {
+				triggerlist.push_back(trigger);
+			}
 		}
 	}
 }
@@ -399,13 +409,24 @@ CueBoxUI::trigger_cue_row (uint64_t n)
 }
 
 void
+CueBoxUI::set_session (Session* s)
+{
+	SessionHandlePtr::set_session (s);
+	build ();
+}
+
+void
 CueBoxUI::build ()
 {
-	// clear_items (true);
-
+	/* Spite: one row per scene; rebuilt when scenes are inserted or removed */
+	for (auto& slot : _slots) {
+		delete slot;
+	}
 	_slots.clear ();
 
-	for (int32_t n = 0; n < TriggerBox::default_triggers_per_box; ++n) { // TODO
+	int32_t const n_scenes = _session ? (int32_t) _session->scene_count () : TriggerBox::default_triggers_per_box;
+
+	for (int32_t n = 0; n < n_scenes; ++n) {
 		CueEntry* te = new CueEntry (this, n);
 
 		_slots.push_back (te);
@@ -422,7 +443,7 @@ CueBoxUI::_size_allocate (ArdourCanvas::Rect const& alloc)
 	const float width  = alloc.width ();
 	const float height = alloc.height ();
 
-	const float slot_h = height / TriggerBox::default_triggers_per_box; // TODO
+	const float slot_h = height / std::max<size_t> (1, _slots.size ()); /* Spite: one row per scene */
 
 	float ypos = 0;
 	for (auto& slot : _slots) {
@@ -445,8 +466,10 @@ CueBoxUI::event (GdkEvent* ev, uint64_t n)
 	switch (ev->type) {
 	case GDK_BUTTON_PRESS:
 		if (ev->button.button == 1) {
+			SceneActions::set_selected_scene (n); /* Spite: for Insert Scene */
 			trigger_cue_row (n);
 		} else if (Gtkmm2ext::Keyboard::is_context_menu_event (&ev->button)) {
+			SceneActions::set_selected_scene (n);
 			context_menu (&ev->button, n);
 		}
 		break;
@@ -462,6 +485,27 @@ CueBoxWidget::CueBoxWidget (float w, float h)
 {
 	ui = new CueBoxUI (root ());
 	set_background_color (UIConfiguration::instance ().color (X_("theme:bg")));
+}
+
+void
+CueBoxWidget::set_session (Session* s)
+{
+	SessionHandlePtr::set_session (s);
+	if (!s) {
+		_scene_connection.disconnect ();
+		return;
+	}
+	ui->set_session (s);
+	s->SceneCountChanged.connect (_scene_connection, invalidator (*this), std::bind (&CueBoxWidget::scenes_changed, this), gui_context ());
+	scenes_changed ();
+}
+
+void
+CueBoxWidget::scenes_changed ()
+{
+	ui->build ();
+	set_nominal_height (ui->n_rows () * 16.f); /* the clip slots' row height, TriggerBoxWidget::slot_height () */
+	repeat_size_allocation ();
 }
 
 void

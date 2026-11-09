@@ -362,6 +362,7 @@ Session::Session (AudioEngine &eng,
 	, _had_destructive_tracks (false)
 	, _pending_cue (-1)
 	, _active_cue (-1)
+	, _scene_count (TriggerBox::default_triggers_per_box)
 	, tb_with_filled_slots (0)
 	, _global_quantization (Config->get_default_quantization())
 {
@@ -3655,6 +3656,11 @@ Session::add_routes (RouteList& new_routes, bool input_auto_connect, bool output
 	} catch (...) {
 		error << _("Adding new tracks/busses failed") << endmsg;
 	}
+
+	/* Spite: new trigger boxes follow the scene count, or make it grow
+	 * (a track template, or a session from before Spite had scenes)
+	 */
+	sync_scenes ();
 
 	/* During the route additions there will have been potentially several
 	 * signals emitted to indicate the new graph. ::graph_reordered() will

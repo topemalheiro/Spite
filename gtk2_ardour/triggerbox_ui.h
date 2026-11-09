@@ -126,6 +126,9 @@ public:
 	TriggerStrip& strip() const { return _strip; }
 	TriggerEntry* entry_by_trigger (ARDOUR::Trigger const &) const;
 
+	void build (); /* Spite: also to rebuild, when scenes are inserted or removed */
+	ARDOUR::TriggerBox& triggerbox () const { return _triggerbox; }
+
 	static Glib::RefPtr<Gtk::TargetList> dnd_src ()
 	{
 		return _dnd_src;
@@ -139,8 +142,6 @@ private:
 	TriggerStrip&       _strip;
 
 	static Glib::RefPtr<Gtk::TargetList> _dnd_src;
-
-	void build ();
 
 	void selection_changed ();
 
@@ -163,9 +164,14 @@ public:
 	void set_triggerbox (ARDOUR::TriggerBox* tb);
 	TriggerStrip& strip() const { return _strip; }
 	TriggerBoxUI* ui() const { return _ui; }
+
+	static float slot_height () { return 16.f; } /* Spite: one scene's row */
 private:
 	TriggerBoxUI* _ui;
 	TriggerStrip& _strip;
+	PBD::ScopedConnection _scene_connection;
+
+	void scenes_changed (); /* Spite: the session's scene count changed */
 };
 
 #endif

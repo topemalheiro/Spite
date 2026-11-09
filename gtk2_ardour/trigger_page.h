@@ -209,5 +209,13 @@ private:
 	TriggerStrip*  _master_strip;
 	Gtk::Alignment _master_align;
 	bool           _align_queued;
+
+	/* Spite: scenes can outgrow the window. The master column (scene column,
+	 * master strip) sits in a viewport that asks for no height, scrolled
+	 * with the strips.
+	 */
+	Gtk::VBox      _master_column;
+	Gtk::Viewport* _master_viewport;
+	void           sync_master_scroll ();
 };
 

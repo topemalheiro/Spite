@@ -48,6 +48,14 @@ public:
 	virtual float nominal_width() {return _nominal_width;}
 	virtual float nominal_height() {return _nominal_height;}
 
+	/* Spite: e.g. a clip grid's height follows the session's scene count */
+	void set_nominal_height (float h) {
+		if (h != _nominal_height) {
+			_nominal_height = h;
+			Gtk::Widget::queue_resize (); /* not GtkCanvas::queue_resize (), which is the canvas items' */
+		}
+	}
+
 private:
 	ArdourCanvas::Rect _allocation;
 

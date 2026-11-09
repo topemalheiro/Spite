@@ -2232,6 +2232,7 @@ LuaBindings::common (lua_State* L)
 		/* Spite: the clip launcher, for scripts that build ready-to-play sets */
 		.deriveWSPtrClass <TriggerBox, Processor> ("TriggerBox")
 		.addFunction ("set_from_path", &TriggerBox::set_from_path)
+		.addFunction ("n_triggers", &TriggerBox::n_triggers) /* Spite: scenes */
 		.endClass ()
 
 		.deriveWSPtrClass <Amp, Processor> ("Amp")
@@ -3284,6 +3285,10 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("add_internal_send", (void (Session::*)(std::shared_ptr<Route>, std::shared_ptr<Processor>, std::shared_ptr<Route>))&Session::add_internal_send)
 		.addFunction ("add_internal_sends", &Session::add_internal_sends)
 		.addFunction ("locations", &Session::locations)
+		.addFunction ("scene_count", &Session::scene_count) /* Spite: scenes */
+		.addFunction ("insert_scene", &Session::insert_scene)
+		.addFunction ("scene_removable", &Session::scene_removable)
+		.addFunction ("remove_scene", &Session::remove_scene)
 		.addFunction ("soloing", &Session::soloing)
 		.addFunction ("listening", &Session::listening)
 		.addFunction ("solo_isolated", &Session::solo_isolated)

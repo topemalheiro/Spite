@@ -665,6 +665,47 @@ Trigger::get_state () const
 	return *node;
 }
 
+void
+Trigger::shift_follow_targets (uint32_t at, int delta)
+{
+	/* Spite: see TriggerBox::insert_slot () and remove_slot (). Called with
+	 * the process lock held, so the property can be set directly as well as
+	 * the UI state: it is what gets saved.
+	 */
+	for (int which = 0; which < 2; ++which) {
+		FollowAction fa (which == 0 ? follow_action0 () : follow_action1 ());
+		if (fa.targets.none ()) {
+			continue;
+		}
+		FollowAction::Targets moved;
+		for (size_t b = 0; b < moved.size (); ++b) {
+			if (!fa.targets.test (b)) {
+				continue;
+			}
+			if (b < at) {
+				moved.set (b);
+			} else if (delta > 0) {
+				if (b + delta < moved.size ()) {
+					moved.set (b + delta);
+				}
+			} else if (b > at) {
+				moved.set (b + delta);
+			} /* else: the removed slot itself */
+		}
+		if (moved == fa.targets) {
+			continue;
+		}
+		fa.targets = moved;
+		if (which == 0) {
+			set_follow_action0 (fa);
+			_follow_action0 = fa;
+		} else {
+			set_follow_action1 (fa);
+			_follow_action1 = fa;
+		}
+	}
+}
+
 int
 Trigger::set_state (const XMLNode& node, int version)
 {
@@ -3713,14 +3754,16 @@ TriggerBox::TriggerBox (Session& s, DataType dt)
 {
 	set_display_to_user (false);
 
-	/* default number of possible triggers. call ::add_trigger() to increase */
+	/* Spite: as many slots as the session has scenes */
+
+	uint32_t const n_slots = std::max<uint32_t> (1, std::min<uint32_t> (s.scene_count (), max_triggers_per_box));
 
 	if (_data_type == DataType::AUDIO) {
-		for (uint32_t n = 0; n < TriggerBox::default_triggers_per_box; ++n) {
+		for (uint32_t n = 0; n < n_slots; ++n) {
 			all_triggers.push_back (std::make_shared<AudioTrigger> (n, *this));
 		}
 	} else {
-		for (uint32_t n = 0; n < TriggerBox::default_triggers_per_box; ++n) {
+		for (uint32_t n = 0; n < n_slots; ++n) {
 			all_triggers.push_back (std::make_shared<MIDITrigger> (n, *this));
 		}
 	}
@@ -4443,6 +4486,10 @@ TriggerBox::maybe_swap_pending (uint32_t slot)
 			   trigger swap will happen, so we will ask the trigger
 			   helper thread to take care of it.
 			*/
+			/* Spite: a scene may have been inserted or removed while
+			 * the new trigger was being made
+			 */
+			p->set_index (slot);
 			all_triggers[slot].reset (p, Trigger::request_trigger_delete);
 			TriggerSwapped (slot); /* EMIT SIGNAL */
 		}
@@ -4816,6 +4863,122 @@ TriggerBox::add_trigger (TriggerPtr trigger)
 {
 	PBD::RWLock::WriterLock lm (trigger_lock);
 	all_triggers.push_back (trigger);
+}
+
+/* Spite: scenes. The caller holds the process lock (the RT thread uses
+ * all_triggers without a lock), see Session::insert_scene ().
+ */
+
+uint32_t
+TriggerBox::n_triggers () const
+{
+	PBD::RWLock::ReaderLock lm (trigger_lock);
+	return all_triggers.size ();
+}
+
+static TriggerPtr
+new_slot (DataType dt, uint32_t n, TriggerBox& box)
+{
+	TriggerPtr t;
+	if (dt == DataType::AUDIO) {
+		t.reset (new AudioTrigger (n, box), Trigger::request_trigger_delete);
+	} else {
+		t.reset (new MIDITrigger (n, box), Trigger::request_trigger_delete);
+	}
+	return t;
+}
+
+void
+TriggerBox::insert_slot (uint32_t at)
+{
+	PBD::RWLock::WriterLock lm (trigger_lock);
+
+	if (all_triggers.size () >= (size_t) max_triggers_per_box) {
+		return;
+	}
+
+	at = std::min<uint32_t> (at, all_triggers.size ());
+
+	TriggerPtr t (new_slot (_data_type, at, *this));
+	t->io_change ();
+	all_triggers.insert (all_triggers.begin () + at, t);
+
+	for (uint32_t n = at + 1; n < all_triggers.size (); ++n) {
+		all_triggers[n]->set_index (n);
+	}
+	for (auto const & tr : all_triggers) {
+		tr->shift_follow_targets (at, 1);
+	}
+	if (_active_scene >= (int32_t) at) {
+		++_active_scene;
+	}
+	pending.push_back (0);
+}
+
+bool
+TriggerBox::slot_removable (uint32_t at) const
+{
+	PBD::RWLock::ReaderLock lm (trigger_lock);
+
+	if (at >= all_triggers.size () || all_triggers.size () < 2) {
+		return false;
+	}
+
+	/* only an empty slot: no clip, none being loaded or recorded into */
+	TriggerPtr const & t (all_triggers[at]);
+	if (t->playable () || t->the_region () || t->has_pending ()) {
+		return false;
+	}
+	SlotArmInfo* ai = _arm_info.load ();
+	if (ai && ai->slot == t.get ()) {
+		return false;
+	}
+	return true;
+}
+
+void
+TriggerBox::remove_slot (uint32_t at)
+{
+	if (!slot_removable (at)) {
+		return;
+	}
+
+	PBD::RWLock::WriterLock lm (trigger_lock);
+
+	/* the trigger goes away in the worker thread (request_trigger_delete) */
+	all_triggers.erase (all_triggers.begin () + at);
+
+	for (uint32_t n = at; n < all_triggers.size (); ++n) {
+		all_triggers[n]->set_index (n);
+	}
+	for (auto const & tr : all_triggers) {
+		tr->shift_follow_targets (at, -1);
+	}
+	if (_active_scene > (int32_t) at) {
+		--_active_scene;
+	} else if (_active_scene == (int32_t) at) {
+		_active_scene = -1;
+	}
+	if (!pending.empty ()) {
+		pending.pop_back ();
+	}
+}
+
+void
+TriggerBox::add_slots_to (uint32_t n)
+{
+	PBD::RWLock::WriterLock lm (trigger_lock);
+
+	n = std::min<uint32_t> (n, max_triggers_per_box);
+
+	while (all_triggers.size () < n) {
+		TriggerPtr t (new_slot (_data_type, all_triggers.size (), *this));
+		t->io_change ();
+		all_triggers.push_back (t);
+	}
+	while (pending.size () < all_triggers.size ()) {
+		pending.push_back (0);
+	}
 }
 
 void
@@ -5540,7 +5703,7 @@ TriggerBox::determine_next_trigger (uint32_t current)
 	uint32_t runnable = 0;
 	std::vector<int32_t> possible_targets;
 
-	possible_targets.reserve (TriggerBox::default_triggers_per_box);
+	possible_targets.reserve (TriggerBox::max_triggers_per_box);
 
 	/* count number of triggers that can actually be run (i.e. they have a region) */
 
@@ -5652,7 +5815,7 @@ TriggerBox::determine_next_trigger (uint32_t current)
 		break;
 
 	case FollowAction::JumpTrigger:
-		for (std::size_t n = 0; n < TriggerBox::default_triggers_per_box; ++n) {
+		for (std::size_t n = 0; n < std::min (all_triggers.size (), fa.targets.size ()); ++n) {
 			if (fa.targets.test (n) && all_triggers[n]->playable()) {
 				possible_targets.push_back (n);
 			}
@@ -5742,6 +5905,12 @@ TriggerBox::set_state (const XMLNode& node, int version)
 	 * EmptyStatusChanged, but for now we don't consider ::set_state() to
 	 * be used except at session load.
 	 */
+
+	/* Spite: at least as many slots as the session has scenes. A box with
+	 * more makes the session grow (Session::sync_scenes ()), so no clip is
+	 * ever dropped.
+	 */
+	add_slots_to (_session.scene_count ());
 
 	return 0;
 }

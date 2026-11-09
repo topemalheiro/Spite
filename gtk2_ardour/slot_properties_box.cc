@@ -144,13 +144,7 @@ SlotPropertyTable::SlotPropertyTable ()
 	_follow_left.add_menu_elem (MenuElem (follow_action_to_string(FollowAction (FollowAction::ForwardTrigger)), sigc::bind (sigc::mem_fun (*this, &SlotPropertyTable::set_follow_action), FollowAction (FollowAction::ForwardTrigger), 0)));
 
 	Menu*     jump_menu = manage (new Menu);
-	MenuList& jitems      = jump_menu->items ();
-	jitems.push_back (MenuElem (_("Multi..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::edit_jump), false)));
-	for (int i = 0; i < TriggerBox::default_triggers_per_box; i++) {
-		FollowAction jump_fa = (FollowAction::JumpTrigger);
-		jump_fa.targets.set(i);
-		jitems.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &SlotPropertyTable::set_follow_action), jump_fa, 0)));
-	}
+	_jump_menu[0] = jump_menu; /* Spite: filled by fill_jump_menus () */
 	_follow_left.add_menu_elem (MenuElem (_("Jump"), *jump_menu));
 	_follow_left.set_sizing_text (longest_follow);
 
@@ -161,13 +155,9 @@ SlotPropertyTable::SlotPropertyTable ()
 	_follow_right.add_menu_elem (MenuElem (follow_action_to_string(FollowAction (FollowAction::ReverseTrigger)), sigc::bind (sigc::mem_fun (*this, &SlotPropertyTable::set_follow_action), FollowAction (FollowAction::ReverseTrigger), 1)));
 	_follow_right.add_menu_elem (MenuElem (follow_action_to_string(FollowAction (FollowAction::ForwardTrigger)), sigc::bind (sigc::mem_fun (*this, &SlotPropertyTable::set_follow_action), FollowAction (FollowAction::ForwardTrigger), 1)));
 	Menu*     jump_menu_1 = manage (new Menu);
-	MenuList& jitems_1      = jump_menu_1->items ();
-	jitems_1.push_back (MenuElem (_("Multi..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::edit_jump), true)));
-	for (int i = 0; i < TriggerBox::default_triggers_per_box; i++) {
-		FollowAction jump_fa = (FollowAction::JumpTrigger);
-		jump_fa.targets.set(i);
-		jitems_1.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &SlotPropertyTable::set_follow_action), jump_fa, 1)));
-	}
+	_jump_menu[1] = jump_menu_1;
+	_jump_menu_rows = 0;
+	fill_jump_menus (TriggerBox::default_triggers_per_box);
 	_follow_right.add_menu_elem (MenuElem (_("Jump"), *jump_menu_1));
 	_follow_right.set_sizing_text (longest_follow);
 
@@ -588,9 +578,32 @@ SlotPropertyTable::set_follow_action (FollowAction const & fa, uint64_t idx)
 }
 
 void
+SlotPropertyTable::fill_jump_menus (uint32_t n_scenes)
+{
+	using namespace Gtk::Menu_Helpers;
+
+	if (n_scenes == _jump_menu_rows) {
+		return;
+	}
+	_jump_menu_rows = n_scenes;
+
+	for (int which = 0; which < 2; ++which) {
+		MenuList& jitems (_jump_menu[which]->items ());
+		jitems.clear ();
+		jitems.push_back (MenuElem (_("Multi..."), sigc::bind (sigc::mem_fun (*this, &TriggerUI::edit_jump), which == 1)));
+		for (uint32_t i = 0; i < n_scenes; i++) {
+			FollowAction jump_fa = (FollowAction::JumpTrigger);
+			jump_fa.targets.set (i);
+			jitems.push_back (MenuElem (cue_marker_name (i), sigc::bind (sigc::mem_fun (*this, &SlotPropertyTable::set_follow_action), jump_fa, which)));
+		}
+	}
+}
+
+void
 SlotPropertyTable::on_trigger_set ()
 {
 	std::shared_ptr<Trigger> trigr = trigger();
+	fill_jump_menus (triggerbox ().n_triggers ()); /* Spite: one entry per scene */
 	if (std::dynamic_pointer_cast<MIDITrigger> (trigr)) {
 		SessionObject* obj = triggerbox ().owner ();
 		std::shared_ptr<Stripable> stripable = obj->session().stripable_by_id (obj->id ());

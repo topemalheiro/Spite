@@ -79,10 +79,14 @@ public:
 
 	void _size_allocate (ArdourCanvas::Rect const&);
 
+	/* Spite: one row per scene, rebuilt when the scene count changes */
+	void set_session (ARDOUR::Session*);
+	void build ();
+	uint32_t n_rows () const { return _slots.size (); }
+
 private:
 	bool event (GdkEvent*, uint64_t);
 	bool text_event (GdkEvent*, uint64_t);
-	void build ();
 
 	void context_menu (GdkEventButton*, uint64_t idx);
 	void get_slots (TriggerList &triggerlist, uint64_t idx);
@@ -106,18 +110,16 @@ class CueBoxWidget : public FittedCanvasWidget, public ARDOUR::SessionHandlePtr
 public:
 	CueBoxWidget (float w, float h);
 
-	void set_session (ARDOUR::Session* s) {
-		SessionHandlePtr::set_session(s);
-		if (s) {
-			ui->set_session(s);
-		}
-	}
+	void set_session (ARDOUR::Session* s);
 
 	void on_map ();
 	void on_unmap ();
 
 private:
 	CueBoxUI* ui;
+	PBD::ScopedConnection _scene_connection;
+
+	void scenes_changed (); /* Spite: the session's scene count changed */
 };
 
 /* XXX probably for testing only */
