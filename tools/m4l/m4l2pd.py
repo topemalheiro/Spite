@@ -508,7 +508,10 @@ class PdObj:
 
     def _pos_line(self):
         """the index of the line that holds the object's position"""
-        return len(self.lines) - 1 if self.lines[-1].startswith('#X restore') else 0
+        for i in (len(self.lines) - 1, len(self.lines) - 2):
+            if i >= 0 and self.lines[i].startswith('#X restore'):
+                return i
+        return 0
 
     def move(self, dx, dy):
         if not (dx or dy):
@@ -548,11 +551,13 @@ class PdObj:
             width = max(ideal, io_min)
         else:
             i = self._pos_line()
-            self.lines[i] = self.lines[i][:-1] + ', f %d;' % chars
+            if self.lines[i].startswith('#X restore'):
+                # ', f' after '#X restore' would go to the subpatch's last object: Pd's own line
+                self.lines.insert(i + 1, '#X f %d;' % chars)
+            else:
+                self.lines[i] = self.lines[i][:-1] + ', f %d;' % chars
             if self.kind == 'text':
                 h = 16 * len(wrap_like_pd(text, chars)) + 4
-            if self.lines[i].startswith('#X restore'):
-                width = max(ideal, io_min)  # plugdata draws a subpatch box at its text's width for now
         self.bounds = (x, y, width, h)
         return width
 
@@ -730,12 +735,22 @@ def dial(b, xy, rect, face):
         name = v.get('parameter_shortname') or v.get('parameter_longname') or ''
         objs.append(note(name, (x, y), int(w), color(b.get('textcolor'), LIVE['text']), 1,
                          (int(face[0]), int(face[1])) if face else None))
+    inmap, conns = {0: (0, 0)}, []
+    if b.get('_active'):
+        # Max's 'active 0/1' enables the dial; ELSE's knob takes 'active' as keyboard focus, and
+        # is disabled with 'readonly 1/0' instead
+        sub = ['#X obj 20 20 inlet;', '#X obj 20 50 route active;', '#X obj 20 80 == 0;',
+               '#X msg 20 110 readonly \\$1;', '#X obj 20 150 outlet;']
+        objs.append(PdObj(subpatch('%d %d' % (x, y - 24), 'active', sub, [(0, 0, 1, 0), (1, 0, 2, 0), (2, 0, 3, 0),
+                                                                          (3, 0, 4, 0), (1, 1, 4, 0)]),
+                          text_bounds(x, y - 24, 'pd active'), 1, 1))
+        inmap, conns = {0: (len(objs) - 1, 0)}, [(len(objs) - 1, 0, 0, 0)]
     if unit:
-        return Tr(objs, outmap={1: (0, 0)}, inmap={0: (0, 0)})
+        return Tr(objs, outmap={1: (0, 0)}, inmap=inmap, conns=conns)
     if 1 not in used:
-        return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
+        return Tr(objs, outmap={0: (0, 0)}, inmap=inmap, conns=conns)
     objs.append(normalized(lo, hi, exp, (x, y + ky + size + 8)))
-    return Tr(objs, outmap={0: (0, 0), 1: (len(objs) - 1, 0)}, inmap={0: (0, 0)}, conns=[(0, 0, len(objs) - 1, 0)])
+    return Tr(objs, outmap={0: (0, 0), 1: (len(objs) - 1, 0)}, inmap=inmap, conns=conns + [(0, 0, len(objs) - 1, 0)])
 
 
 def normalized(lo, hi, exp, xy):
@@ -1171,6 +1186,9 @@ class Converter:
                 byid[pl['destination'][0]].setdefault('_fed', set()).add(pl['destination'][1])
             dst = byid.get(pl['destination'][0])
             src = byid.get(pl['source'][0])
+            if dst and src and dst.get('maxclass') == 'live.dial' and src.get('maxclass') == 'message' and \
+                    ((src.get('text') or '').split(' ') or [''])[0] == 'active':
+                dst['_active'] = True
             if dst and src and dst.get('maxclass') == 'scope~' and src.get('maxclass') == 'message':
                 src['text'] = re.sub(r'(^|,\s*)(?:presentation_size|patching_size)\b', r'\1dim', src.get('text', ''))
             if NEW_OBJECTS and src and dst and dst.get('maxclass') == 'message' and \
