@@ -1314,7 +1314,8 @@ class Converter:
                     continue
                 if a['pd'][1] + a['pd'][3] <= u['pd'][1] or u['pd'][1] + u['pd'][3] <= a['pd'][1]:
                     continue
-                dx = max(dx, a['pd'][0] + a['pd'][2] + gap - u['pd'][0])
+                space = um[0] - (am[0] + am[2])  # never more room than Max leaves between them
+                dx = max(dx, a['pd'][0] + a['pd'][2] + min(gap, max(space, 0)) - u['pd'][0])
             if dx > 0:
                 move(u, dx, 0)
             placed.append(u)
