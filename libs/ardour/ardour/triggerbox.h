@@ -903,11 +903,12 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	 * (Session::scene_count()), which every trigger box follows. A new
 	 * session starts with default_triggers_per_box. Empty slots store
 	 * nothing (SlotEntry) and follow-action targets are runs of scenes
-	 * (FollowTargets), so nothing depends on max_triggers_per_box any more
-	 * but the clamps that still use it (plan step 8 removes it).
+	 * (FollowTargets), so the number of scenes is unlimited:
+	 * max_triggers_per_box is only a guard below the int32 scene numbers
+	 * (CueRecord::stop_all is INT32_MAX), memory and screen permitting.
 	 */
 	static const int32_t default_triggers_per_box = 8;
-	static const int32_t max_triggers_per_box = 1024; /* Spite: until the cap goes (plan step 8) */
+	static const int32_t max_triggers_per_box = INT32_MAX - 2;
 
 	TriggerBox (Session&, DataType dt);
 	~TriggerBox ();

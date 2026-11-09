@@ -1431,8 +1431,8 @@ public:
 
 	/* Spite: scenes. Every track's trigger box has scene_count () slots.
 	 * Saved with the session; a new session has
-	 * TriggerBox::default_triggers_per_box, and at most
-	 * TriggerBox::max_triggers_per_box. insert_scene () adds an empty
+	 * TriggerBox::default_triggers_per_box, and there is no limit but the
+	 * int32 guard TriggerBox::max_triggers_per_box. insert_scene () adds an empty
 	 * scene before `at` (scene_count () appends); remove_scene () removes
 	 * only an empty one. Cue markers stay on their scenes. Both return
 	 * false when nothing changed. See also SceneCommand, for undo.
