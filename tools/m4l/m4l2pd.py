@@ -707,12 +707,18 @@ def dial(b, xy, rect, face):
     # the knob keeps Max's range and initial value (what the inspector, a double-click and
     # automation see); Max's right outlet, the position 0-1, gets the smallest box that computes it
     fg = color(b.get('activeneedlecolor') or b.get('activedialcolor'), LIVE['arc'])
+    track, angle = LIVE['track'], 300
+    tiny = appearance == 1 and NEW_OBJECTS
+    if tiny:
+        # Live's tiny dial: a 270 degree ring (Max's activefgdialcolor) and a needle (activeneedlecolor)
+        track, angle = color(b.get('activefgdialcolor'), '#888888'), 270
+        fg = color(b.get('activeneedlecolor'), LIVE['arc'])
     textsize = int(round(text_height(b.get('fontsize', 9.5))))
     # live.dial's arc always starts at its minimum, bipolar range or not. The value shows under
     # the knob: centred on it with PgD4S's numberalign, else from its left
-    knob = ('else/knob %d %s %s %s %s empty empty %s %s %s 0 0 %d %d 1 300 0 0 %s empty empty %d %d %d %d 0 %d 0 %d 0 1'
-            % (size, lo, hi, 0 if exp == 1 else exp, init, LIVE['bg'], LIVE['track'], fg, steps,
-               1 if v.get('parameter_type') == 1 else 0, lo, 1 if shownumber else 0,
+    knob = ('else/knob %d %s %s %s %s empty empty %s %s %s 0 0 %d %d 1 %d 0 0 %s empty empty %d %d %d %d 0 %d 0 %d 0 1'
+            % (size, lo, hi, 0 if exp == 1 else exp, init, LIVE['bg'], track, fg, steps,
+               1 if v.get('parameter_type') == 1 else 0, angle, lo, 1 if shownumber else 0,
                textsize if NEW_OBJECTS else 11, 0 if NEW_OBJECTS else int(size / 2) - 12,
                size + 3 if NEW_OBJECTS else size + 1, 1 if init_on else 0, 1 if b.get('ignoreclick') else 0))
     x, y = xy
@@ -724,7 +730,11 @@ def dial(b, xy, rect, face):
             objs[0].attrs += [('name', pd_symbol_words(name)), ('namesize', str(textsize))]
         objs[0].attrs.append(('textcolor', color(b.get('textcolor'), LIVE['text'])))
         if appearance == 1:
-            objs[0].attrs.append(('needle', 'plain'))  # Live's tiny dial: a needle, no arc
+            objs[0].attrs.append(('needle', 'tinyleft'))  # Live's tiny dial (Tiny (right) is its mirror)
+            if not b.get('triangle'):
+                objs[0].attrs.append(('triangle', '0'))  # Max's triangle marks the initial value
+            elif b.get('tricolor'):
+                objs[0].attrs.append(('tricolor', color(b.get('tricolor'), '#d9d9d9')))
         if shownumber:
             u = UNITS.get(int(num(v.get('parameter_unitstyle', 1))), '')
             if u:
@@ -804,8 +814,9 @@ def numbox(b, xy, rect, face):
     unit_w = int(round(inter_width(unit, fs + 3))) + 3 if unit else 0
     digits = max(1, int(round((w - unit_w - 5 - hh // 2) * 36.0 / (fs * 31))))
     fg = color(b.get('textcolor') or b.get('activeslidercolor'), LIVE['value'])
-    if see_through(b.get('textcolor')):
-        fg = b.get('_behind', LIVE['bg'])  # Max hides the number (Snake's Fundamental): text the colour behind
+    hide = see_through(b.get('textcolor'))  # Max hides the number (Snake's Fundamental, over a note name)
+    if hide and not NEW_OBJECTS:
+        fg = b.get('_behind', LIVE['bg'])  # older builds: digits the colour of what's behind them
     lines = ('#X obj %d %d nbx %d %d %s %s 0 %d empty empty %s %d %d 0 %d %s %s %s %s 256;'
              % (xy[0], xy[1], digits, hh, lo, hi, 1 if init_on else 0,
                 pd_symbol(unit) if unit else 'empty', int(w) - unit_w + 1, int(h / 2), fs,
@@ -823,6 +834,8 @@ def numbox(b, xy, rect, face):
                           ('align', ('left', 'center', 'right')[int(num(b.get('textjustification', 1))) % 3])]
         if unit:
             objs[0].attrs.append(('unit', unit))
+        if hide:
+            objs[0].attrs.append(('hidetext', '1'))
     if 1 not in b.get('_used', {0}):
         return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
     objs.append(normalized(lo, hi, exp, (xy[0], xy[1] + int(h) + 8)))
@@ -856,21 +869,60 @@ def popmenu(b, xy, rect, face):
 
 
 def toggle_button(b, xy, rect, face, conv):
-    """live.text / live.toggle / live.button -> ELSE [button] (toggle or bang) with its text on top"""
+    """live.text / live.toggle / live.button -> ELSE [button] (toggle or bang). A live.text carries
+    its own text (PgD4S's button text attributes; a note on top for older builds). A toggle with a
+    Max initial value gets it at load from a [loadmess], as Max outputs parameter_initial."""
     cls = b.get('maxclass')
     w, h = int(rect[2]), int(rect[3])
     mode = 1 if (cls == 'live.toggle' or (cls == 'live.text' and b.get('mode', 1) == 1)) else 2
-    bg = color(b.get('bgcolor') or b.get('activebgcolor'), LIVE['off'])
-    fg = color(b.get('bgoncolor') or b.get('activebgoncolor'), LIVE['on'])
+    lcd = cls == 'live.text' and b.get('appearance') == 2
+    if lcd:
+        # Max's LCD look: the fill stays dark, the text lights up in lcdcolor when on
+        bg = fg = color(b.get('lcdbgcolor'), LIVE['bg'])
+        text_off = color(b.get('inactivelcdcolor'), LIVE['text'])
+        text_on = color(b.get('lcdcolor'), LIVE['value'])
+        hidden = see_through(b.get('lcdbgcolor'))
+    else:
+        off, on = b.get('activebgcolor') or b.get('bgcolor'), b.get('activebgoncolor') or b.get('bgoncolor')
+        bg, fg = color(off, LIVE['off']), color(on, LIVE['on'])
+        t_off = b.get('activetextoffcolor') or b.get('textoffcolor')
+        t_on = b.get('activetextcolor') or b.get('textcolor')
+        text_off = color(t_off, None) if t_off and not see_through(t_off) else None
+        text_on = color(t_on, None) if t_on and not see_through(t_on) else None
+        hidden = see_through(off) and see_through(on)
     oval = 1 if cls == 'live.button' else 0  # Live draws live.button round; ELSE's [button] arg 8
     readonly = 1 if b.get('ignoreclick') else 0  # Max's ignoreclick is ELSE's readonly
-    objs = [PdObj('#X obj %d %d button %d %d %s %s %d 0 0 %d %d empty empty;' % (xy[0], xy[1], max(w, 8), max(h, 8), bg, fg, mode, oval, readonly),
+    objs = [PdObj('#X obj %d %d button %d %d %s %s %d 0 %d %d %d empty empty;'
+                  % (xy[0], xy[1], max(w, 8), max(h, 8), bg, fg, mode, 1 if hidden else 0, oval, readonly),
                   (xy[0], xy[1], w, h), 1, 1, (int(face[0]), int(face[1])) if face else None)]
-    text = b.get('text') if cls == 'live.text' else ''
-    if text:
-        objs.append(note(text, (xy[0], xy[1] + max(0, int((h - 13) / 2))), w, color(b.get('textcolor'), '#e0e0e0'), 1,
+    text = (b.get('text') or '') if cls == 'live.text' else ''
+    texton = b.get('texton') or ''
+    invisible = (see_through(b.get('textcolor')) and see_through(b.get('textoffcolor'))) if not lcd else False
+    if text and NEW_OBJECTS and not invisible:
+        btn = objs[0]
+        btn.attrs.append(('text', pd_symbol_words(text)))
+        if texton and texton != text:
+            btn.attrs.append(('texton', pd_symbol_words(texton)))
+        if text_off:
+            btn.attrs.append(('textcolor', text_off))
+        if text_on:
+            btn.attrs.append(('textoncolor', text_on))
+        btn.attrs.append(('fontsize', str(int(round(text_height(b.get('fontsize', 9.5)))))))
+        just = b.get('textjustification')
+        if just in (0, 2):
+            btn.attrs.append(('align', 'left' if just == 0 else 'right'))
+    elif text and not invisible:
+        objs.append(note(text, (xy[0], xy[1] + max(0, int((h - 13) / 2))), w, text_off or '#e0e0e0', 1,
                          (int(face[0]), int(face[1]) + max(0, int((h - 13) / 2))) if face else None))
-    return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
+    v, init_on = param_flags(b)
+    conns = []
+    if mode == 1 and init_on:
+        init = v.get('parameter_initial', [0])
+        init = num(init[0] if isinstance(init, list) and init else init, 0)
+        objs.append(PdObj('#X obj %d %d cyclone/loadmess %s;' % (xy[0], xy[1] - 24, 1 if init else 0),
+                          text_bounds(xy[0], xy[1] - 24, 'cyclone/loadmess 1'), 1, 1))
+        conns.append((len(objs) - 1, 0, 0, 0))
+    return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)}, conns=conns)
 
 
 def spite_tab(b, xy, rect, face, conv):
