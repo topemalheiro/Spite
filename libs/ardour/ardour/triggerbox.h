@@ -792,7 +792,7 @@ class LIBARDOUR_API TriggerBoxThread
 
 	void set_region (TriggerBox&, uint32_t slot, std::shared_ptr<Region>);
 	void request_delete_trigger (Trigger* t);
-	void request_build_source (Trigger* t, Temporal::timecnt_t const & duration, Temporal::timepos_t const &, samplecnt_t pre_capture);
+	void request_build_source (std::shared_ptr<Trigger> t, Temporal::timecnt_t const & duration, Temporal::timepos_t const &, samplecnt_t pre_capture);
 
 	void summon();
 	void stop();
@@ -814,12 +814,14 @@ class LIBARDOUR_API TriggerBoxThread
 		Request (RequestType t) : type (t) {}
 
 		RequestType type;
-		/* for set region */
-		TriggerBox* box;
+		/* for set region (Spite: a box that went away meanwhile is skipped) */
+		std::weak_ptr<TriggerBox> box;
 		uint32_t slot;
 		std::shared_ptr<Region> region;
-		/* for DeleteTrigger and BuildSourceAndRegion */
+		/* for DeleteTrigger */
 		Trigger* trigger;
+		/* for BuildSourceAndRegion (Spite: kept alive until it is built) */
+		std::shared_ptr<Trigger> captured;
 		Temporal::timecnt_t duration;
 		Temporal::timepos_t position;
 		samplecnt_t pre_capture;
@@ -837,7 +839,7 @@ class LIBARDOUR_API TriggerBoxThread
 	CrossThreadChannel _xthread;
 	void queue_request (Request*);
 	void delete_trigger (Trigger*);
-	void build_source (Trigger*, Temporal::timecnt_t const & duration, Temporal::timepos_t const &, samplecnt_t pre_capture);
+	void build_source (std::shared_ptr<Trigger>, Temporal::timecnt_t const & duration, Temporal::timepos_t const &, samplecnt_t pre_capture);
 	void build_midi_source (MIDITrigger*, Temporal::timecnt_t const &, Temporal::timepos_t const &, samplecnt_t pre_capture);
 	void build_audio_source (AudioTrigger*, Temporal::timecnt_t const &, Temporal::timepos_t const &, samplecnt_t pre_capture);
 };
@@ -918,7 +920,15 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	bool can_support_io_configuration (const ChanCount& in, ChanCount& out);
 	bool configure_io (ChanCount in, ChanCount out);
 
-	bool empty() const { return _active_slots == 0; }
+	bool empty() const { return _active_slots.load () == 0; }
+	/* Spite: a slot got a clip (true) or lost it (false): counts the slots
+	 * with clips, and emits EmptyStatusChanged from or to none
+	 */
+	void slot_playable_changed (bool now_playable);
+	/* the next trigger queued to start, for surfaces (not the audio thread) */
+	TriggerPtr peek_next_trigger ();
+	/* Spite: slot n's trigger, for the audio thread (no lock) */
+	TriggerPtr trigger_rt (uint32_t n) const { return n < all_triggers.size () ? all_triggers[n] : TriggerPtr (); }
 	PBD::Signal<void()> EmptyStatusChanged;
 
 	int32_t order() const { return _order; }
@@ -991,8 +1001,6 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	double position_as_fraction() const;
 
 	void queue_explict (uint32_t);
-	TriggerPtr get_next_trigger ();
-	TriggerPtr peek_next_trigger ();
 
 	void set_region (uint32_t slot, std::shared_ptr<Region> region);
 
@@ -1080,12 +1088,6 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	mutable PBD::RWLock trigger_lock; /* protects all_triggers */
 	Triggers all_triggers;
 
-	typedef std::vector<Trigger*> PendingTriggers;
-	PendingTriggers pending;
-	/* Spite: determine_next_trigger ()'s jump targets, reserved once
-	 * (max_triggers_per_box) so the RT thread never allocates
-	 */
-	std::vector<int32_t> _possible_targets;
 
 	/* Spite: see queue_edit_swap_check (). True to start: look once. */
 	std::atomic<bool> _edit_swaps_queued {true};
@@ -1094,11 +1096,12 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	std::atomic<bool> _property_updates_queued {true};
 
 	PBD::RingBuffer<uint32_t> explicit_queue; /* user queued triggers */
+	void shift_explicit_queue (uint32_t at, int delta); /* Spite */
 	TriggerPtr               _currently_playing;
 	Requests                 _requests;
 	bool                     _stop_all;
 	int32_t                  _active_scene;
-	int32_t                  _active_slots;
+	std::atomic<int32_t>     _active_slots; /* Spite: read by the audio thread (empty ()) */
 	bool                     _locate_armed;
 	bool                     _cancel_locate_armed;
 	bool                     _fast_forwarding;
@@ -1117,7 +1120,7 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	int determine_next_trigger (uint32_t n);
 	void stop_all ();
 
-	void maybe_swap_pending (uint32_t);
+	void maybe_swap_pending (uint32_t, BufferSet&, samplepos_t);
 
 	void parameter_changed (std::string const &);
 	static void static_parameter_changed (std::string const &);

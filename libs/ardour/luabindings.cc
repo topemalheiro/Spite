@@ -2230,12 +2230,19 @@ LuaBindings::common (lua_State* L)
 		.endClass ()
 
 		/* Spite: the clip launcher, for scripts that build ready-to-play sets */
+		/* Spite: a follow action from its saved form, e.g. "ForwardTrigger:0" or "JumpTrigger:@3,700" */
+		.beginClass <FollowAction> ("FollowAction")
+		.addConstructor <void (*) (std::string const&)> ()
+		.addFunction ("to_string", &FollowAction::to_string)
+		.endClass ()
+
 		.deriveWSPtrClass <TriggerBox, Processor> ("TriggerBox")
 		.addFunction ("set_from_path", &TriggerBox::set_from_path)
 		.addFunction ("n_triggers", &TriggerBox::n_triggers) /* Spite: scenes */
 		.addFunction ("bang_trigger_at", &TriggerBox::bang_trigger_at)
 		.addFunction ("stop_all_immediately", &TriggerBox::stop_all_immediately)
 		.addFunction ("set_all_probability", &TriggerBox::set_all_probability)
+		.addFunction ("set_all_follow_action", &TriggerBox::set_all_follow_action)
 		.endClass ()
 
 		.deriveWSPtrClass <Amp, Processor> ("Amp")

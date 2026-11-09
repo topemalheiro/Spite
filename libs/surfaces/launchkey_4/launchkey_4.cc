@@ -976,6 +976,9 @@ LaunchKey4::pad_trigger (Pad& pad, int velocity)
 		trigger_stop_col (pad.x, true); /* immediate */
 	} else {
 		TriggerPtr trigger = session->trigger_at (pad.x, pad.y + scroll_y_offset);
+		if (!trigger) { /* Spite: past the last scene, or no track there */
+			return;
+		}
 		switch (trigger->state()) {
 		case Trigger::Stopped:
 			trigger->bang (velocity / 127.0f);
@@ -1311,6 +1314,10 @@ LaunchKey4::button_down()
 		return;
 	}
 
+	/* Spite: the pads show two scenes; scroll no further than the last */
+	if ((uint32_t) (scroll_y_offset + 2) >= session->scene_count ()) {
+		return;
+	}
 	scroll_y_offset += 1;
 	show_scene_ids ();
 }

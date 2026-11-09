@@ -796,7 +796,11 @@ Trigger::set_region (std::shared_ptr<Region> r, bool use_thread)
 	if (!r) {
 		TriggerPtr cp (_box.currently_playing());
 		if (!cp || cp.get() != this) {
+			bool const was = playable ();
 			set_region_in_worker_thread (r);
+			if (was && !playable ()) { /* Spite: the box counts its slots with clips */
+				_box.slot_playable_changed (false);
+			}
 		} else {
 			/* clear operation, no need to talk to the worker thread */
 			set_pending (Trigger::MagicClearPointerValue);
@@ -1927,7 +1931,9 @@ static const samplecnt_t rb_blocksize = 1024;
 void
 AudioTrigger::reset_stretcher ()
 {
-	_stretcher->reset ();
+	if (_stretcher) { /* Spite: an empty slot has none */
+		_stretcher->reset ();
+	}
 	got_stretcher_padding = false;
 	to_pad = 0;
 	to_drop = 0;
@@ -2010,7 +2016,9 @@ AudioTrigger::captured (SlotArmInfo& ai)
 	_box.queue_explict (index());
 
 	/* duration value is irrelevant */
-	TriggerBox::worker->request_build_source (this, timecnt_t (0), timepos_t (ai.start_beats), pre_capture);
+	if (TriggerPtr self = _box.trigger_rt (index ()); self.get () == this) { /* Spite: kept alive meanwhile */
+		TriggerBox::worker->request_build_source (self, timecnt_t (0), timepos_t (ai.start_beats), pre_capture);
+	}
 
 	disarm ();
 }
@@ -2691,7 +2699,9 @@ MIDITrigger::captured (SlotArmInfo& ai)
 	/* Meanwhile, build a new source and region from the data now in rt_midibuffer */
 
 	// std::cerr << "capture done, ask for a source of length " << dur.beats().str() << std::endl;
-	TriggerBox::worker->request_build_source (this, timecnt_t (dur.beats()), timepos_t (ai.start_beats), pre_capture);
+	if (TriggerPtr self = _box.trigger_rt (index ()); self.get () == this) { /* Spite: kept alive meanwhile */
+		TriggerBox::worker->request_build_source (self, timecnt_t (dur.beats()), timepos_t (ai.start_beats), pre_capture);
+	}
 
 	disarm ();
 }
@@ -3811,21 +3821,18 @@ TriggerBox::TriggerBox (Session& s, DataType dt)
 
 	uint32_t const n_slots = std::max<uint32_t> (1, std::min<uint32_t> (s.scene_count (), max_triggers_per_box));
 
+	/* Spite: with the deleter every other slot has, so the first clip
+	 * loaded into one of these doesn't free it on the audio thread
+	 */
 	if (_data_type == DataType::AUDIO) {
 		for (uint32_t n = 0; n < n_slots; ++n) {
-			all_triggers.push_back (std::make_shared<AudioTrigger> (n, *this));
+			all_triggers.push_back (TriggerPtr (new AudioTrigger (n, *this), Trigger::request_trigger_delete));
 		}
 	} else {
 		for (uint32_t n = 0; n < n_slots; ++n) {
-			all_triggers.push_back (std::make_shared<MIDITrigger> (n, *this));
+			all_triggers.push_back (TriggerPtr (new MIDITrigger (n, *this), Trigger::request_trigger_delete));
 		}
 	}
-
-	while (pending.size() < all_triggers.size()) {
-		pending.push_back (std::atomic<Trigger*>(0));
-	}
-
-	_possible_targets.reserve (max_triggers_per_box);
 
 	Config->ParameterChanged.connect_same_thread (*this, std::bind (&TriggerBox::parameter_changed, this, _1));
 	_session.config.ParameterChanged.connect_same_thread (*this, std::bind (&TriggerBox::parameter_changed, this, _1));
@@ -3931,8 +3938,13 @@ TriggerBox::finish_recording ()
 	/* This transfers responsibility for the SlotArmInfo object to the
 	   trigger
 	*/
-	ai->slot->captured (*ai);
+	Trigger* slot     = ai->slot;
+	bool const was    = slot->playable ();
+	slot->captured (*ai);
 	_arm_info = nullptr;
+	if (!was && slot->playable ()) { /* Spite: it holds a clip now */
+		slot_playable_changed (true);
+	}
 
 	/* XXX this should likely be dependent on what the post-record action is */
 
@@ -4279,7 +4291,7 @@ TriggerBox::fast_forward (CueEvents const & cues, samplepos_t transport_position
 				break;
 			}
 
-			if (!all_triggers[c->cue]->cue_isolated()) {
+			if (c->cue >= 0 && c->cue < (int32_t) all_triggers.size () && !all_triggers[c->cue]->cue_isolated()) { /* Spite: a cue past the last scene */
 				DEBUG_TRACE (DEBUG::Triggers, string_compose ("Found first non-CI cue for %1 at %2\n", c->cue, c->time));
 				break;
 			}
@@ -4293,7 +4305,7 @@ TriggerBox::fast_forward (CueEvents const & cues, samplepos_t transport_position
 	 */
 
 
-	if (c == cues.rend() || (c->cue == CueRecord::stop_all) || (c->time == transport_position)) {
+	if (c == cues.rend() || (c->cue == CueRecord::stop_all) || (c->time == transport_position) || c->cue < 0 || c->cue >= (int32_t) all_triggers.size ()) {
 		fast_forward_nothing_to_do ();
 		return;
 	}
@@ -4505,7 +4517,7 @@ TriggerBox::set_pending (uint32_t slot, Trigger* t)
 }
 
 void
-TriggerBox::maybe_swap_pending (uint32_t slot)
+TriggerBox::maybe_swap_pending (uint32_t slot, BufferSet& bufs, samplepos_t now)
 {
 	/* This is called synchronously with process() (i.e. in an RT process
 	   thread) and so it is impossible for any Triggers in this TriggerBox
@@ -4513,28 +4525,17 @@ TriggerBox::maybe_swap_pending (uint32_t slot)
 	*/
 
 	Trigger* p = 0;
-	bool empty_changed = false;
 
 	p = all_triggers[slot]->swap_pending (p);
 
 	if (p) {
 
 		if (p == Trigger::MagicClearPointerValue) {
-			if (all_triggers[slot]->playable()) {
-				if (_active_slots) {
-					_active_slots--;
-				}
-				if (_active_slots == 0) {
-					empty_changed = true;
-				}
-			}
+			/* Spite: set_region () counts the slot out (slot_playable_changed ()) */
 			all_triggers[slot]->set_region (nullptr);
 		} else {
 			if (!all_triggers[slot]->playable()) {
-				if (_active_slots == 0) {
-					empty_changed = true;
-				}
-				_active_slots++;
+				slot_playable_changed (true);
 			}
 			/* Note use of a custom delete function. We cannot
 			   delete the old trigger from the RT context where the
@@ -4547,17 +4548,31 @@ TriggerBox::maybe_swap_pending (uint32_t slot)
 			p->set_index (slot);
 			all_triggers[slot].reset (p, Trigger::request_trigger_delete);
 			queue_property_update (); /* Spite: the new trigger's UI state, see run_cycle () */
-			/* Spite: and its data. A MIDI clip's RT buffer comes as an edit
-			 * posted while it waited here, when the scan in run_cycle ()
-			 * couldn't see it yet: without this it never played, and
-			 * launching it crashed in MIDITrigger::midi_run ().
+			/* Spite: and its data, now: a MIDI clip's RT buffer comes as an
+			 * edit posted while it waited here, where the scan in
+			 * run_cycle () couldn't see it, and it may start in this very
+			 * cycle. Without it, it never played, and launching it crashed
+			 * in MIDITrigger::midi_run ().
 			 */
-			queue_edit_swap_check ();
+			p->check_edit_swap (timepos_t (now), false, bufs);
 			TriggerSwapped (slot); /* EMIT SIGNAL */
 		}
 	}
 
-	if (empty_changed) {
+}
+
+void
+TriggerBox::slot_playable_changed (bool now_playable)
+{
+	if (now_playable) {
+		if (_active_slots.fetch_add (1) == 0) {
+			EmptyStatusChanged (); /* EMIT SIGNAL */
+		}
+		return;
+	}
+	int32_t v = _active_slots.load ();
+	while (v > 0 && !_active_slots.compare_exchange_weak (v, v - 1)) {}
+	if (v == 1) {
 		EmptyStatusChanged (); /* EMIT SIGNAL */
 	}
 }
@@ -4591,26 +4606,10 @@ TriggerBox::peek_next_trigger ()
 	explicit_queue.get_read_vector (&rwv);
 
 	if (rwv.len[0] > 0) {
-
-		/* peek at it without dequeing it */
-
-		uint32_t n = *(rwv.buf[0]);
-		return trigger (n);
+		/* peek at it without dequeing it; null for a slot past the last */
+		return trigger (*(rwv.buf[0]));
 	}
 
-	return TriggerPtr();
-}
-
-TriggerPtr
-TriggerBox::get_next_trigger ()
-{
-	uint32_t n;
-
-	if (explicit_queue.read (&n, 1) == 1) {
-		TriggerPtr r = trigger (n);
-		DEBUG_TRACE (DEBUG::Triggers, string_compose ("next trigger from explicit queue = %1\n", r->index()));
-		return r;
-	}
 	return TriggerPtr();
 }
 
@@ -4783,6 +4782,9 @@ TriggerBox::clear_all_triggers ()
 void
 TriggerBox::clear_cue (int cue)
 {
+	if (cue < 0 || cue >= (int) all_triggers.size ()) { /* Spite */
+		return;
+	}
 	all_triggers[cue]->set_region (std::shared_ptr<Region>());
 }
 
@@ -4983,7 +4985,7 @@ TriggerBox::insert_slot (uint32_t at)
 	if (_active_scene >= (int32_t) at) {
 		++_active_scene;
 	}
-	pending.push_back (0);
+	shift_explicit_queue (at, 1);
 	queue_all_slot_checks (); /* the slots moved */
 }
 
@@ -5031,10 +5033,30 @@ TriggerBox::remove_slot (uint32_t at)
 	} else if (_active_scene == (int32_t) at) {
 		_active_scene = -1;
 	}
-	if (!pending.empty ()) {
-		pending.pop_back ();
-	}
+	shift_explicit_queue (at, -1);
 	queue_all_slot_checks (); /* the slots moved */
+}
+
+void
+TriggerBox::shift_explicit_queue (uint32_t at, int delta)
+{
+	/* Spite: queued launches name slots: keep them on their clips when a
+	 * scene is inserted (delta 1) or removed (-1) at `at`. A launch queued
+	 * for a removed (empty) slot goes. Called with the process lock held,
+	 * so the audio thread, the queue's only reader and writer, isn't
+	 * running.
+	 */
+	std::vector<uint32_t> q;
+	uint32_t              n;
+	while (explicit_queue.read (&n, 1) == 1) {
+		if (delta < 0 && n == at) {
+			continue;
+		}
+		q.push_back (n >= at ? n + delta : n);
+	}
+	for (auto const& i : q) {
+		explicit_queue.write (&i, 1);
+	}
 }
 
 void
@@ -5048,9 +5070,6 @@ TriggerBox::add_slots_to (uint32_t n)
 		TriggerPtr t (new_slot (_data_type, all_triggers.size (), *this));
 		t->io_change ();
 		all_triggers.push_back (t);
-	}
-	while (pending.size () < all_triggers.size ()) {
-		pending.push_back (0);
 	}
 }
 
@@ -5487,18 +5506,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 	if (_slot_swaps_queued.exchange (false)) {
 		for (uint32_t n = 0; n < all_triggers.size(); ++n) {
 			if (all_triggers[n] != _currently_playing) {
-				maybe_swap_pending (n);
+				maybe_swap_pending (n, bufs, start_sample);
 			} else if (all_triggers[n]->has_pending ()) {
 				_slot_swaps_queued.store (true);
 			}
 		}
 	}
 
-	/* Spite: only when a slot has posted an edit (queue_edit_swap_check ()).
-	 * After the slot swaps: a trigger the worker made posts its data (a MIDI
-	 * clip's RT buffer) while it waits to be swapped in, and must have it
-	 * before it can run, maybe in this very cycle (see maybe_swap_pending ()).
-	 */
+	/* Spite: only when a slot has posted an edit (queue_edit_swap_check ()) */
 	if (_edit_swaps_queued.exchange (false)) {
 		for (uint64_t n = 0; n < all_triggers.size(); ++n) {
 			all_triggers[n]->check_edit_swap (timepos_t (start_sample), _currently_playing == all_triggers[n], bufs);
@@ -5509,11 +5524,25 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 	 */
 
 	if (!_currently_playing && !allstop) {
-		if ((_currently_playing = get_next_trigger()) != 0) {
-			maybe_swap_pending (_currently_playing->index());
+		/* Spite: a clip waiting to be swapped into the slot goes in first,
+		 * and it is the slot's trigger after that that starts (this used to
+		 * start the one swapped out). A launch queued for a slot without a
+		 * clip is dropped.
+		 */
+		uint32_t n;
+		while (explicit_queue.read (&n, 1) == 1) {
+			if (n >= all_triggers.size ()) {
+				continue;
+			}
+			maybe_swap_pending (n, bufs, start_sample);
+			if (!all_triggers[n]->playable ()) {
+				continue;
+			}
+			_currently_playing = all_triggers[n];
 			_currently_playing->startup (bufs, 0);
 			send_property_change (Properties::currently_playing);
 			active_trigger_boxes.fetch_add (1);
+			break;
 		}
 	}
 
@@ -5635,7 +5664,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 			/* peek at it without dequeing it */
 
 			uint32_t n = *(rwv.buf[0]);
-			nxt = trigger (n);
+
+			if (n >= all_triggers.size () || (!all_triggers[n]->playable () && !all_triggers[n]->has_pending ())) {
+				/* Spite: a launch queued for a slot without a clip */
+				explicit_queue.increment_read_idx (1);
+				continue;
+			}
+
+			nxt = all_triggers[n];
 
 			/* if user triggered same clip, that will have been handled as
 			 * it processed bang requests. Nothing to do here otherwise.
@@ -5658,8 +5694,8 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 
 					/* starting up next trigger, check for pending */
 
-					maybe_swap_pending (n);
-					nxt = trigger (n);
+					maybe_swap_pending (n, bufs, start_sample);
+					nxt = all_triggers[n];
 
 					nxt->jump_start ();
 					_currently_playing->jump_stop (bufs, dest_offset);
@@ -5677,8 +5713,8 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 						explicit_queue.increment_read_idx (1); /* consume the entry we peeked at */
 
 						/* starting up next trigger, check for pending */
-						maybe_swap_pending (n);
-						nxt = trigger (n);
+						maybe_swap_pending (n, bufs, start_sample);
+						nxt = all_triggers[n];
 
 						nxt->startup (bufs, dest_offset);
 						DEBUG_TRACE (DEBUG::Triggers, string_compose ("%1 was finished, started %2\n", _currently_playing->index(), nxt->index()));
@@ -5802,13 +5838,12 @@ TriggerBox::determine_next_trigger (uint32_t current)
 {
 	uint32_t n;
 	uint32_t runnable = 0;
-	std::vector<int32_t>& possible_targets (_possible_targets); /* Spite: reserved in the constructor */
 
-	possible_targets.clear ();
+	/* count number of triggers that can actually be run (i.e. they have a
+	 * region). Spite: all that matters below is none, one or more.
+	 */
 
-	/* count number of triggers that can actually be run (i.e. they have a region) */
-
-	for (uint32_t n = 0; n < all_triggers.size(); ++n) {
+	for (uint32_t n = 0; n < all_triggers.size() && runnable < 2; ++n) {
 		if (all_triggers[n]->playable()) {
 			runnable++;
 		}
@@ -5915,16 +5950,22 @@ TriggerBox::determine_next_trigger (uint32_t current)
 		}
 		break;
 
-	case FollowAction::JumpTrigger:
+	case FollowAction::JumpTrigger: {
+		/* Spite: pick one of the playable targets, each as likely, in one
+		 * pass and without a list (reservoir sampling); none: stop, as
+		 * the code before meant to (it returned slot 1)
+		 */
+		int32_t  pick = -1;
+		uint32_t seen = 0;
 		for (std::size_t n = 0; n < std::min (all_triggers.size (), fa.targets.size ()); ++n) {
 			if (fa.targets.test (n) && all_triggers[n]->playable()) {
-				possible_targets.push_back (n);
+				if (_pcg.rand (++seen) == 0) {
+					pick = n;
+				}
 			}
 		}
-		if (possible_targets.empty()) {
-			return 1;
-		}
-		return possible_targets[_pcg.rand (possible_targets.size())];
+		return pick;
+	}
 
 
 	/* NOTREACHED */
@@ -6187,13 +6228,15 @@ TriggerBoxThread::thread_work ()
 			while (requests.read (&req, 1) == 1) {
 				switch (req->type) {
 				case SetRegion:
-					req->box->set_region (req->slot, req->region);
+					if (std::shared_ptr<TriggerBox> box = req->box.lock ()) {
+						box->set_region (req->slot, req->region);
+					}
 					break;
 				case DeleteTrigger:
 					delete_trigger (req->trigger);
 					break;
 				case BuildSourceAndRegion:
-					build_source (req->trigger, req->duration, req->position, req->pre_capture);
+					build_source (req->captured, req->duration, req->position, req->pre_capture);
 					break;
 				default:
 					break;
@@ -6217,6 +6260,9 @@ TriggerBoxThread::queue_request (Request* req)
 
 	if (req->type != Quit) {
 		if (requests.write (&req, 1) != 1) {
+			/* Spite: it used to leak */
+			std::cerr << string_compose ("TriggerBoxThread: request queue full, request of type %1 dropped\n", (int) req->type);
+			delete req;
 			return;
 		}
 	}
@@ -6247,7 +6293,7 @@ TriggerBoxThread::set_region (TriggerBox& box, uint32_t slot, std::shared_ptr<Re
 {
 	TriggerBoxThread::Request* req = new TriggerBoxThread::Request (TriggerBoxThread::SetRegion);
 
-	req->box = &box;
+	req->box = box.weak_from_this ();
 	req->slot = slot;
 	req->region = r;
 
@@ -6263,10 +6309,10 @@ TriggerBoxThread::request_delete_trigger (Trigger* t)
 }
 
 void
-TriggerBoxThread::request_build_source (Trigger* t, Temporal::timecnt_t const & len, Temporal::timepos_t const & timeline_pos, samplecnt_t pre_capture)
+TriggerBoxThread::request_build_source (std::shared_ptr<Trigger> t, Temporal::timecnt_t const & len, Temporal::timepos_t const & timeline_pos, samplecnt_t pre_capture)
 {
 	TriggerBoxThread::Request* req = new TriggerBoxThread::Request (BuildSourceAndRegion);
-	req->trigger  = t;
+	req->captured = t;
 	req->pre_capture = pre_capture;
 	req->duration = len;
 	req->position = timeline_pos;
@@ -6280,14 +6326,14 @@ TriggerBoxThread::delete_trigger (Trigger* t)
 }
 
 void
-TriggerBoxThread::build_source (Trigger* t, Temporal::timecnt_t const & duration, Temporal::timepos_t const & pos, samplecnt_t pre_capture)
+TriggerBoxThread::build_source (std::shared_ptr<Trigger> t, Temporal::timecnt_t const & duration, Temporal::timepos_t const & pos, samplecnt_t pre_capture)
 {
-	MIDITrigger* mt = dynamic_cast<MIDITrigger*> (t);
+	MIDITrigger* mt = dynamic_cast<MIDITrigger*> (t.get ());
 	AudioTrigger* at;
 
 	if (mt) {
 		build_midi_source (mt, duration, pos, pre_capture);
-	} else if ((at = dynamic_cast<AudioTrigger*> (t))) {
+	} else if ((at = dynamic_cast<AudioTrigger*> (t.get ()))) {
 		build_audio_source (at, duration, pos, pre_capture);
 	}
 }

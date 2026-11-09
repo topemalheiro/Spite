@@ -443,12 +443,14 @@ CueLayout::viewport_changed ()
 
 			if (tb) {
 				tb->PropertyChanged.connect (_route_connections, invalidator (*this), std::bind (&CueLayout::triggerbox_property_change, this, _1, n), &_p2);
+				/* Spite: a slot got another trigger (a clip was loaded): connect the pads to it */
+				tb->TriggerSwapped.connect (_route_connections, invalidator (*this), std::bind (&CueLayout::viewport_changed, this), &_p2);
 			}
 
 			for (int y = 0; y < 8; ++y) {
 				std::shared_ptr<Push2::Pad> pad = _p2.pad_by_xy (n, y);
 				if (tb && tb->active()) {
-					TriggerPtr tp = tb->trigger (y);
+					TriggerPtr tp = tb->trigger (y + scene_base); /* Spite: the scenes scrolled to */
 					if (tp && tp->playable()) {
 						/* trigger in slot */
 						pad->set_color (color);
@@ -708,8 +710,7 @@ CueLayout::trigger_property_change (PropertyChange const& what_changed, uint32_t
 		std::shared_ptr<TriggerBox> tb = _route[col]->triggerbox ();
 		assert (tb);
 
-		trig = tb->trigger (row);
-		assert (trig);
+		trig = tb->trigger (row + scene_base); /* Spite: the scenes scrolled to; null past the last */
 
 		std::shared_ptr<Push2::Pad> pad = _p2.pad_by_xy (col, row);
 		assert (pad);
@@ -753,8 +754,7 @@ CueLayout::triggerbox_property_change (PropertyChange const& what_changed, uint3
 			std::shared_ptr<Push2::Pad> pad = _p2.pad_by_xy (col, y);
 			assert (pad);
 
-			TriggerPtr trig = tb->trigger (y);
-			assert (trig);
+			TriggerPtr trig = tb->trigger (y + scene_base); /* Spite: the scenes scrolled to; null past the last */
 
 			set_pad_color_from_trigger_state (col, pad, trig);
 
@@ -797,7 +797,7 @@ CueLayout::set_pad_color_from_trigger_state (int col, std::shared_ptr<Push2::Pad
 		return;
 	}
 
-	if (trig->playable()) {
+	if (trig && trig->playable()) {
 
 		if (trig->active()) {
 
