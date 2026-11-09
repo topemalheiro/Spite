@@ -473,6 +473,13 @@ def item_msg(item):
         return 'symbol ' + pd_symbol(item)
 
 
+def see_through(c):
+    """a Max colour with alpha 0"""
+    if isinstance(c, dict):
+        c = c.get('color')
+    return isinstance(c, list) and len(c) >= 4 and float(c[3]) == 0
+
+
 def presented(b):
     """the box's presentation rectangle, or None when it is not on the face"""
     if b.get('presentation') and not b.get('hidden') and b.get('presentation_rect'):
@@ -697,24 +704,17 @@ def dial(b, xy, rect, face):
     exp = num(v.get('parameter_exponent', 1)) or 1
     steps = int(num(v.get('parameter_steps', 0)))
     used = b.get('_used', {0})
-    # Max's right outlet sends the dial's position, 0-1. When only that one is wired and the
-    # value isn't shown, the knob itself runs 0-1 (no box to add); otherwise a box computes it
-    unit = 1 in used and 0 not in used and not shownumber
-    if unit:
-        span = (hi - lo) or 1
-        init = round(max(0.0, min(1.0, (init - lo) / float(span))) ** (1.0 / exp), 6)
-        if v.get('parameter_type') == 1 and not steps:
-            steps = int(abs(hi - lo)) + 1
-        lo, hi, exp = 0, 1, 1
+    # the knob keeps Max's range and initial value (what the inspector, a double-click and
+    # automation see); Max's right outlet, the position 0-1, gets the smallest box that computes it
     fg = color(b.get('activeneedlecolor') or b.get('activedialcolor'), LIVE['arc'])
     textsize = int(round(text_height(b.get('fontsize', 9.5))))
     # live.dial's arc always starts at its minimum, bipolar range or not. The value shows under
     # the knob: centred on it with PgD4S's numberalign, else from its left
-    knob = ('else/knob %d %s %s %s %s empty empty %s %s %s 0 0 %d %d 1 300 0 0 %s empty empty %d %d %d %d 0 %d 0 0 0 1'
+    knob = ('else/knob %d %s %s %s %s empty empty %s %s %s 0 0 %d %d 1 300 0 0 %s empty empty %d %d %d %d 0 %d 0 %d 0 1'
             % (size, lo, hi, 0 if exp == 1 else exp, init, LIVE['bg'], LIVE['track'], fg, steps,
                1 if v.get('parameter_type') == 1 else 0, lo, 1 if shownumber else 0,
                textsize if NEW_OBJECTS else 11, 0 if NEW_OBJECTS else int(size / 2) - 12,
-               size + 3 if NEW_OBJECTS else size + 1, 1 if init_on else 0))
+               size + 3 if NEW_OBJECTS else size + 1, 1 if init_on else 0, 1 if b.get('ignoreclick') else 0))
     x, y = xy
     objs = [PdObj('#X obj %d %d %s;' % (x + kx, y + ky, knob), (x + kx, y + ky, size + 1, size + 1),
                   1, 1, (int(face[0]) + kx, int(face[1]) + ky) if face else None)]
@@ -725,7 +725,7 @@ def dial(b, xy, rect, face):
         objs[0].attrs.append(('textcolor', color(b.get('textcolor'), LIVE['text'])))
         if appearance == 1:
             objs[0].attrs.append(('needle', 'plain'))  # Live's tiny dial: a needle, no arc
-        if shownumber and not unit:
+        if shownumber:
             u = UNITS.get(int(num(v.get('parameter_unitstyle', 1))), '')
             if u:
                 objs[0].attrs.append(('unit', u))
@@ -745,8 +745,6 @@ def dial(b, xy, rect, face):
                                                                           (3, 0, 4, 0), (1, 1, 4, 0)]),
                           text_bounds(x, y - 24, 'pd active'), 1, 1))
         inmap, conns = {0: (len(objs) - 1, 0)}, [(len(objs) - 1, 0, 0, 0)]
-    if unit:
-        return Tr(objs, outmap={1: (0, 0)}, inmap=inmap, conns=conns)
     if 1 not in used:
         return Tr(objs, outmap={0: (0, 0)}, inmap=inmap, conns=conns)
     objs.append(normalized(lo, hi, exp, (x, y + ky + size + 8)))
@@ -806,6 +804,8 @@ def numbox(b, xy, rect, face):
     unit_w = int(round(inter_width(unit, fs + 3))) + 3 if unit else 0
     digits = max(1, int(round((w - unit_w - 5 - hh // 2) * 36.0 / (fs * 31))))
     fg = color(b.get('textcolor') or b.get('activeslidercolor'), LIVE['value'])
+    if see_through(b.get('textcolor')):
+        fg = b.get('_behind', LIVE['bg'])  # Max hides the number (Snake's Fundamental): text the colour behind
     lines = ('#X obj %d %d nbx %d %d %s %s 0 %d empty empty %s %d %d 0 %d %s %s %s %s 256;'
              % (xy[0], xy[1], digits, hh, lo, hi, 1 if init_on else 0,
                 pd_symbol(unit) if unit else 'empty', int(w) - unit_w + 1, int(h / 2), fs,
@@ -863,7 +863,8 @@ def toggle_button(b, xy, rect, face, conv):
     bg = color(b.get('bgcolor') or b.get('activebgcolor'), LIVE['off'])
     fg = color(b.get('bgoncolor') or b.get('activebgoncolor'), LIVE['on'])
     oval = 1 if cls == 'live.button' else 0  # Live draws live.button round; ELSE's [button] arg 8
-    objs = [PdObj('#X obj %d %d button %d %d %s %s %d 0 0 %d 0 empty empty;' % (xy[0], xy[1], max(w, 8), max(h, 8), bg, fg, mode, oval),
+    readonly = 1 if b.get('ignoreclick') else 0  # Max's ignoreclick is ELSE's readonly
+    objs = [PdObj('#X obj %d %d button %d %d %s %s %d 0 0 %d %d empty empty;' % (xy[0], xy[1], max(w, 8), max(h, 8), bg, fg, mode, oval, readonly),
                   (xy[0], xy[1], w, h), 1, 1, (int(face[0]), int(face[1])) if face else None)]
     text = b.get('text') if cls == 'live.text' else ''
     if text:
@@ -1202,6 +1203,9 @@ class Converter:
                     ((src.get('text') or '').split(' ') or [''])[0] == 'thispatcher':
                 # Max counts the selector in $N: 'window size l t r b' is $3..$6 there, $2..$5 in Pd
                 dst['text'] = re.sub(r'\$(\d+)', lambda m: '$%d' % max(1, int(m.group(1)) - 1), dst.get('text', ''))
+        for b in boxes:
+            if see_through(b.get('textcolor')):
+                b['_behind'] = self.behind(b, boxes, device)
         self.delay_lines(boxes, p.get('lines', []))
         if not NEW_OBJECTS:
             self.window_targets(boxes, p.get('lines', []))
@@ -1303,6 +1307,21 @@ class Converter:
                 for key, value in o.attrs:
                     lines.append('#X attr %d %s %s;' % (base + k, key, value))
         return lines
+
+    @staticmethod
+    def behind(b, boxes, device):
+        """the colour under a box on the face: the frontmost panel that covers its centre (Max lists
+        boxes front to back), else the device's background"""
+        r = presented(b) or [float(v) for v in (b.get('patching_rect') or [0, 0, 0, 0])[:4]]
+        cx, cy = r[0] + r[2] / 2.0, r[1] + r[3] / 2.0
+        for o in boxes:
+            q = presented(o)
+            if o is b or o.get('maxclass') != 'panel' or not q:
+                continue
+            fill = o.get('bgfillcolor') or o.get('bgcolor')
+            if q[0] <= cx <= q[0] + q[2] and q[1] <= cy <= q[1] + q[3] and fill and not see_through(fill):
+                return color(fill, LIVE['bg'])
+        return '#363636' if device else LIVE['bg']
 
     def layout(self, ports, extra, exact=False):
         """Max's patching layout in plugdata's sizes. plugdata draws box text bigger than Max
@@ -1516,7 +1535,8 @@ class Converter:
             return obj(pd_escape((name + ' ' + args).strip()), PD_OUTLETS.get(words[0]))
 
         if cls == 'message':
-            t = pd_escape(text)
+            # Max's 'ignoreclick 0/1' (any UI object) is ELSE's 'readonly 0/1' (knob, button)
+            t = pd_escape(re.sub(r'(^|,\s*)ignoreclick\b', r'\1readonly', text))
             msg = PdObj('#X msg %s %s;' % (xy, t), text_bounds(x, y, t, 1, 1), 1, 1, kind='msg')
             if 1 not in b.get('_fed', ()):
                 return Tr(msg)
