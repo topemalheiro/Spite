@@ -2253,6 +2253,8 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("set_has_stop", &TriggerBox::set_has_stop)
 		.addFunction ("trigger", &TriggerBox::trigger)
 		.addFunction ("set_record_enabled", &TriggerBox::set_record_enabled)
+		.addFunction ("reap", &TriggerBox::reap)
+		.addFunction ("last_scene_plus_one", &TriggerBox::last_scene_plus_one)
 		.endClass ()
 
 		/* Spite: a slot's clip (or an empty slot's settings), see TriggerBox:materialize () */

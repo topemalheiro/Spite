@@ -1159,6 +1159,7 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	void publish (std::shared_ptr<SlotMap>);   /* _slots.update (), then wake the audio thread's scans */
 	void install (uint32_t load_id, Trigger*); /* the worker: a loaded clip into the slot waiting for it */
 	TriggerPtr new_trigger (uint32_t scene) const; /* an empty Trigger with the box's defaults */
+	TriggerPtr new_trigger_factory () const;     /* one with the factory settings */
 	void prepare_shift_locked (SlotMap&, uint32_t at, int delta);
 public:
 	/* Spite: Insert/Remove Scene in two steps: prepare_shift () before the

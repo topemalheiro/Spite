@@ -1447,6 +1447,8 @@ public:
 	 * thread that called insert_scene () or remove_scene ()
 	 */
 	PBD::Signal<void(uint32_t, int32_t)> ScenesShifted;
+	/* Spite: a trigger box was loaded from a dense (pre-sparse) file: see set_state () */
+	void loaded_dense_triggers () { _loaded_dense_triggers = true; }
 	CueEvents const & cue_events() const { return _cue_events; }
 
 	int num_triggerboxes () const;
@@ -2501,6 +2503,7 @@ private:
 	void clear_active_cue ();
 
 	std::atomic<int> tb_with_filled_slots; /* Spite: changed from audio threads too (EmptyStatusChanged) */
+	bool _loaded_dense_triggers = false; /* Spite */
 	void handle_slots_empty_status (std::weak_ptr<Route> const &);
 
 	void time_domain_changed ();

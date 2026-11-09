@@ -926,6 +926,21 @@ Session::save_state_full (std::string snapshot_name, SessionSaveDisposition ssd)
 			return -1;
 		}
 
+		/* Spite: clip slots are now saved sparse, which older builds can't
+		 * read: the first time a session loaded from the old (dense) form
+		 * is saved, keep that file as backups/<snapshot>-dense.ardour
+		 */
+		if (_loaded_dense_triggers && Glib::file_test (xml_path, Glib::FILE_TEST_EXISTS)) {
+			std::string bdir (_session_dir->backup_path ());
+			if (Glib::file_test (bdir, Glib::FILE_TEST_IS_DIR) || g_mkdir_with_parents (bdir.c_str (), 0755) == 0) {
+				std::string const dense = Glib::build_filename (bdir, legalize_for_universal_path (snapshot_name + "-dense" + statefile_suffix));
+				if (!Glib::file_test (dense, Glib::FILE_TEST_EXISTS)) {
+					copy_file (xml_path, dense);
+				}
+			}
+			_loaded_dense_triggers = false;
+		}
+
 	} else {
 		assert (snapshot_name == _current_snapshot_name);
 		/* pending save: use pending_suffix (.pending in English) */
@@ -2398,7 +2413,7 @@ Session::set_state (const XMLNode& node, int version)
 	 * boxes have 16 slots, and sync_scenes () keeps them all.
 	 */
 	if (node.get_property (X_("scenes"), _scene_count)) {
-		_scene_count = std::max<uint32_t> (1, std::min<uint32_t> (_scene_count, TriggerBox::max_triggers_per_box));
+		_scene_count = std::max<uint32_t> (1, _scene_count); /* Spite: unlimited (step 6) */
 	}
 
 	if (node.get_property (X_("sample-rate"), _base_sample_rate)) {

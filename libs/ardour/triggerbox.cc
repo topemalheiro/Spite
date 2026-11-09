@@ -3851,6 +3851,19 @@ TriggerBox::collect ()
 }
 
 TriggerPtr
+TriggerBox::new_trigger_factory () const
+{
+	/* a Trigger with the factory settings, in no slot */
+	TriggerPtr t;
+	if (_data_type == DataType::AUDIO) {
+		t.reset (new AudioTrigger (UINT32_MAX, const_cast<TriggerBox&> (*this)), Trigger::request_trigger_delete);
+	} else {
+		t.reset (new MIDITrigger (UINT32_MAX, const_cast<TriggerBox&> (*this)), Trigger::request_trigger_delete);
+	}
+	return t;
+}
+
+TriggerPtr
 TriggerBox::new_trigger (uint32_t scene) const
 {
 	TriggerPtr t;
@@ -6308,25 +6321,43 @@ TriggerBox::get_state () const
 	node.set_property (X_("type"), X_("triggerbox"));
 	node.set_property (X_("data-type"), _data_type.to_string());
 	node.set_property (X_("order"), _order);
-	XMLNode* trigger_child (new XMLNode (X_("Triggers")));
 
-	/* Spite: one node per scene, as before (unlimited-scenes plan, step
-	 * 4: the format changes later): an empty slot writes the defaults
+	/* Spite: only the slots that hold something (unlimited-scenes plan,
+	 * 2.8): <Triggers layout="sparse">, each <Trigger> at its index, a
+	 * slot without a stop button as just <Trigger index= cue-isolated=1/>,
+	 * and the box's defaults in <TriggerDefaults> beside it when they are
+	 * not the factory ones. Older builds can't read this.
 	 */
-	std::shared_ptr<SlotMap const> m (_slots.reader ());
-	uint32_t const n = std::max (scene_count_rt (), m->entries.empty () ? 0 : m->entries.back ().scene + 1);
-	for (uint32_t scene = 0; scene < n; ++scene) {
-		SlotEntry const* e = m->find (scene);
-		if (e && e->trigger) {
-			trigger_child->add_child_nocopy (e->trigger->get_state ());
-		} else {
-			XMLNode& tn (_defaults->get_state ());
-			tn.set_property (X_("index"), scene);
-			if (e && (e->flags & SlotEntry::NoStop)) {
-				tn.set_property (X_("cue-isolated"), true);
+	TriggerPtr const factory (new_trigger_factory ());
+	if (!_defaults->same_settings (*factory)) {
+		XMLNode& dn (_defaults->get_state ());
+		XMLNode* d = new XMLNode (X_("TriggerDefaults"));
+		for (auto const& p : dn.properties ()) {
+			if (p->name () != X_("index")) {
+				d->set_property (p->name ().c_str (), p->value ());
 			}
-			trigger_child->add_child_nocopy (tn);
 		}
+		for (auto const& c : dn.children ()) {
+			d->add_child_copy (*c);
+		}
+		delete &dn;
+		node.add_child_nocopy (*d);
+	}
+
+	XMLNode* trigger_child (new XMLNode (X_("Triggers")));
+	trigger_child->set_property (X_("layout"), X_("sparse"));
+
+	std::shared_ptr<SlotMap const> m (_slots.reader ());
+	for (auto const& e : m->entries) {
+		if (e.trigger) {
+			trigger_child->add_child_nocopy (e.trigger->get_state ());
+		} else if (e.flags & SlotEntry::NoStop) {
+			XMLNode* tn = new XMLNode (X_("Trigger"));
+			tn->set_property (X_("index"), e.scene);
+			tn->set_property (X_("cue-isolated"), true);
+			trigger_child->add_child_nocopy (*tn);
+		}
+		/* a load in progress has nothing to save yet */
 	}
 
 	node.add_child_nocopy (*trigger_child);
@@ -6349,42 +6380,126 @@ TriggerBox::set_state (const XMLNode& node, int version)
 
 	XMLNodeList const & tchildren (tnode->children());
 
-	/* Spite: a slot per node, at its index (by position when an index
-	 * repeats), published once; then reap () drops the empty ones that
-	 * only have the defaults.
+	std::string layout;
+	bool const sparse = tnode->get_property (X_("layout"), layout) && layout == X_("sparse");
+
+	if (XMLNode* dn = node.child (X_("TriggerDefaults"))) {
+		_defaults->set_state (*dn, version);
+		_defaults->set_index (UINT32_MAX);
+	}
+
+	/* Spite: a dense file (upstream's, or Spite's before 2.8) has a node for
+	 * every slot. Its empty slots are folded: the commonest settings among
+	 * them become the box's defaults, those slots store nothing, one that
+	 * differs only by cue-isolate keeps just "no stop button", and any other
+	 * becomes an empty slot with settings of its own.
 	 */
+	auto has_clip = [] (XMLNode const& n) {
+		std::string r;
+		return n.get_property (X_("region"), r) && !r.empty () && r != X_("0");
+	};
+	auto signature = [] (XMLNode const& n, bool with_cue_isolate) {
+		std::string sig;
+		for (auto const& p : n.properties ()) {
+			std::string const& k (p->name ());
+			if (k == X_("index") || k == X_("segment-tempo") || k == X_("name") || k == X_("color") || (!with_cue_isolate && k == X_("cue-isolated"))) {
+				continue;
+			}
+			sig += k + '=' + p->value () + ';';
+		}
+		return sig;
+	};
+
+	std::string common;      /* the defaults' signature, dense files only */
+	std::string common_loose; /* the same without cue-isolate */
+	if (!sparse) {
+		std::map<std::string, std::pair<int, XMLNode const*> > counts;
+		for (auto const& c : tchildren) {
+			if (!has_clip (*c)) {
+				auto& x (counts[signature (*c, true)]);
+				if (!x.second) {
+					x.second = c;
+				}
+				++x.first;
+			}
+		}
+		XMLNode const* rep = nullptr;
+		int most = 0;
+		for (auto const& [sig, x] : counts) {
+			if (x.first > most) {
+				most = x.first;
+				common = sig;
+				rep = x.second;
+			}
+		}
+		if (rep) {
+			_defaults->set_state (*rep, version);
+			_defaults->set_index (UINT32_MAX);
+			_defaults->set_name ("");
+			common_loose = signature (*rep, false);
+		}
+	}
+
 	std::shared_ptr<SlotMap> m (_slots.write_copy ());
 	m->entries.clear ();
 	int32_t active = 0;
 	uint32_t pos = 0;
 
 	for (auto const & tchild : tchildren) {
-		TriggerPtr trig;
+		uint32_t const at = pos++;
+		uint32_t scene = at;
+		tchild->get_property (X_("index"), scene);
+		if (m->find (scene)) {
+			scene = at; /* an index that repeats: by position */
+			if (m->find (scene)) {
+				continue;
+			}
+		}
 
+		if (sparse && tchild->properties ().size () <= 2 && !has_clip (*tchild)) {
+			/* just "no stop button" */
+			bool iso = false;
+			if (tchild->get_property (X_("cue-isolated"), iso) && iso) {
+				find_or_add (*m, scene).flags = SlotEntry::NoStop;
+			}
+			continue;
+		}
+
+		if (!sparse && !has_clip (*tchild) && !common.empty ()) {
+			std::string const sig (signature (*tchild, true));
+			if (sig == common) {
+				continue; /* an empty slot with the defaults: nothing to store */
+			}
+			if (signature (*tchild, false) == common_loose) {
+				bool iso = false;
+				tchild->get_property (X_("cue-isolated"), iso);
+				if (iso) {
+					find_or_add (*m, scene).flags = SlotEntry::NoStop;
+					continue;
+				}
+			}
+		}
+
+		TriggerPtr trig;
 		if (_data_type == DataType::AUDIO) {
-			trig.reset (new AudioTrigger (pos, *this), Trigger::request_trigger_delete);
+			trig.reset (new AudioTrigger (scene, *this), Trigger::request_trigger_delete);
 		} else if (_data_type == DataType::MIDI) {
-			trig.reset (new MIDITrigger (pos, *this), Trigger::request_trigger_delete);
+			trig.reset (new MIDITrigger (scene, *this), Trigger::request_trigger_delete);
 		} else {
 			continue;
 		}
 		trig->set_state (*tchild, version);
-
-		uint32_t scene = trig->index ();
-		if (m->find (scene)) {
-			scene = pos;
-			trig->set_index (scene);
+		trig->set_index (scene);
+		find_or_add (*m, scene).trigger = trig;
+		if (trig->playable ()) {
+			++active;
 		}
-		if (!m->find (scene)) {
-			find_or_add (*m, scene).trigger = trig;
-			if (trig->playable ()) {
-				++active;
-			}
-		}
-		++pos;
 	}
 
 	_active_slots.store (active);
+	if (!sparse) {
+		_session.loaded_dense_triggers ();
+	}
 	publish (m);
 
 	/* Since _active_slots may have changed, we could consider sending
