@@ -3825,6 +3825,22 @@ TriggerBox::send_property_change (PBD::PropertyChange pc)
 	TriggerBoxPropertyChange (pc, _order);
 }
 
+TriggerPtr const TriggerBox::_no_trigger;
+
+void
+TriggerBox::append_slot (TriggerPtr t)
+{
+	all_triggers.push_back (t);
+}
+
+void
+TriggerBox::replace_slot_rt (uint32_t scene, TriggerPtr t)
+{
+	if (scene < all_triggers.size ()) {
+		all_triggers[scene] = t;
+	}
+}
+
 TriggerBox::TriggerBox (Session& s, DataType dt)
 	: Processor (s, _("TriggerBox"), Temporal::TimeDomainProvider (Temporal::BeatTime))
 	, tracker (dt == DataType::MIDI ? new MidiStateTracker : nullptr)
@@ -3854,12 +3870,12 @@ TriggerBox::TriggerBox (Session& s, DataType dt)
 	 */
 	if (_data_type == DataType::AUDIO) {
 		for (uint32_t n = 0; n < n_slots; ++n) {
-			all_triggers.push_back (TriggerPtr (new AudioTrigger (n, *this), Trigger::request_trigger_delete));
+			append_slot (TriggerPtr (new AudioTrigger (n, *this), Trigger::request_trigger_delete));
 		}
 		_defaults.reset (new AudioTrigger (UINT32_MAX, *this), Trigger::request_trigger_delete);
 	} else {
 		for (uint32_t n = 0; n < n_slots; ++n) {
-			all_triggers.push_back (TriggerPtr (new MIDITrigger (n, *this), Trigger::request_trigger_delete));
+			append_slot (TriggerPtr (new MIDITrigger (n, *this), Trigger::request_trigger_delete));
 		}
 		_defaults.reset (new MIDITrigger (UINT32_MAX, *this), Trigger::request_trigger_delete);
 	}
@@ -3946,9 +3962,7 @@ TriggerBox::setup_arm_info_bounds (SlotArmInfo& ai, samplepos_t now, Trigger& sl
 void
 TriggerBox::disarm_all ()
 {
-	for (auto & t : all_triggers) {
-		t->disarm ();
-	}
+	for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->disarm (); });
 }
 
 void
@@ -4207,9 +4221,7 @@ TriggerBox::set_record_enabled (bool yn)
 	_record_state = yn ? Enabled : Disabled;
 
 	if (_record_state == Disabled) {
-		for (auto & trig : all_triggers) {
-			trig->disarm ();
-		}
+		for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->disarm (); });
 	}
 
 	RecEnableChanged (); /* EMIT SIGNAL */
@@ -4321,7 +4333,7 @@ TriggerBox::fast_forward (CueEvents const & cues, samplepos_t transport_position
 				break;
 			}
 
-			if (c->cue >= 0 && c->cue < (int32_t) all_triggers.size () && !all_triggers[c->cue]->cue_isolated()) { /* Spite: a cue past the last scene */
+			if (c->cue >= 0 && slot_rt (c->cue) && !slot_rt (c->cue)->cue_isolated()) { /* Spite: a cue past the last scene, or an empty slot */
 				DEBUG_TRACE (DEBUG::Triggers, string_compose ("Found first non-CI cue for %1 at %2\n", c->cue, c->time));
 				break;
 			}
@@ -4335,12 +4347,12 @@ TriggerBox::fast_forward (CueEvents const & cues, samplepos_t transport_position
 	 */
 
 
-	if (c == cues.rend() || (c->cue == CueRecord::stop_all) || (c->time == transport_position) || c->cue < 0 || c->cue >= (int32_t) all_triggers.size ()) {
+	if (c == cues.rend() || (c->cue == CueRecord::stop_all) || (c->time == transport_position) || c->cue < 0 || !slot_rt (c->cue)) {
 		fast_forward_nothing_to_do ();
 		return;
 	}
 
-	trig = all_triggers[c->cue];
+	trig = slot_rt (c->cue);
 	pos = c->time;
 	cnt = 0;
 
@@ -4364,7 +4376,7 @@ TriggerBox::fast_forward (CueEvents const & cues, samplepos_t transport_position
 				/* new trigger, reset the counter used
 				 * to track iterations run.
 				 */
-				trig = all_triggers[dnt];
+				trig = slot_rt (dnt);
 				cnt = 0;
 			} else {
 				/* for whatever reason, there's no
@@ -4518,21 +4530,30 @@ TriggerBox::set_region (uint32_t slot, std::shared_ptr<Region> region)
 		enqueued_state_map.erase(rs);
 	}
 
+	/* Spite: the slot's trigger now, read with the lock (this ran without
+	 * one while the slots could be shifted by Insert Scene)
+	 */
+	TriggerPtr const cur (stored (slot));
+	if (!cur) {
+		delete t;
+		return;
+	}
+
 	//* always preserve the launch-style and cue_isolate status. It's likely to be right, but if it's wrong the user can "see" it's wrong anyway */
-	t->set_launch_style(all_triggers[slot]->launch_style());
-	t->set_cue_isolated(all_triggers[slot]->cue_isolated());
+	t->set_launch_style(cur->launch_style());
+	t->set_cue_isolated(cur->cue_isolated());
 
 	//* if the existing slot seems to be part of a FA 'arrangement', preserve the settings */
-	if (all_triggers[slot]->follow_action0().is_arrangement()) {
-		t->set_follow_action0(all_triggers[slot]->follow_action0());
-		t->set_follow_action1(all_triggers[slot]->follow_action1());
-		t->set_follow_action_probability(all_triggers[slot]->follow_action_probability());
-		t->set_quantization(all_triggers[slot]->quantization());
+	if (cur->follow_action0().is_arrangement()) {
+		t->set_follow_action0(cur->follow_action0());
+		t->set_follow_action1(cur->follow_action1());
+		t->set_follow_action_probability(cur->follow_action_probability());
+		t->set_quantization(cur->quantization());
 		//color ?
 
-		t->set_follow_count(all_triggers[slot]->follow_count());
-		t->set_follow_length(all_triggers[slot]->follow_length());
-		t->set_use_follow_length(all_triggers[slot]->use_follow_length());
+		t->set_follow_count(cur->follow_count());
+		t->set_follow_length(cur->follow_length());
+		t->set_use_follow_length(cur->use_follow_length());
 	}
 
 	/* XXX what happens if pending is already set? */
@@ -4543,7 +4564,11 @@ TriggerBox::set_region (uint32_t slot, std::shared_ptr<Region> region)
 void
 TriggerBox::set_pending (uint32_t slot, Trigger* t)
 {
-	all_triggers[slot]->set_pending (t);
+	if (TriggerPtr const cur = stored (slot)) {
+		cur->set_pending (t);
+	} else {
+		delete t;
+	}
 }
 
 void
@@ -4554,17 +4579,23 @@ TriggerBox::maybe_swap_pending (uint32_t slot, BufferSet& bufs, samplepos_t now)
 	   to be invoked while this executes.
 	*/
 
+	TriggerPtr const cur (slot_rt (slot));
+
+	if (!cur) {
+		return;
+	}
+
 	Trigger* p = 0;
 
-	p = all_triggers[slot]->swap_pending (p);
+	p = cur->swap_pending (p);
 
 	if (p) {
 
 		if (p == Trigger::MagicClearPointerValue) {
 			/* Spite: set_region () counts the slot out (slot_playable_changed ()) */
-			all_triggers[slot]->set_region (nullptr);
+			cur->set_region (nullptr);
 		} else {
-			if (!all_triggers[slot]->playable()) {
+			if (!cur->playable()) {
 				slot_playable_changed (true);
 			}
 			/* Note use of a custom delete function. We cannot
@@ -4576,7 +4607,7 @@ TriggerBox::maybe_swap_pending (uint32_t slot, BufferSet& bufs, samplepos_t now)
 			 * the new trigger was being made
 			 */
 			p->set_index (slot);
-			all_triggers[slot].reset (p, Trigger::request_trigger_delete);
+			replace_slot_rt (slot, TriggerPtr (p, Trigger::request_trigger_delete));
 			queue_property_update (); /* Spite: the new trigger's UI state, see run_cycle () */
 			/* Spite: and its data, now: a MIDI clip's RT buffer comes as an
 			 * edit posted while it waited here, where the scan in
@@ -4616,7 +4647,7 @@ TriggerBox::set_order (int32_t n)
 void
 TriggerBox::queue_explict (uint32_t n)
 {
-	assert (n < all_triggers.size());
+	assert (n < scene_count_rt ());
 	explicit_queue.write (&n, 1);
 
 	send_property_change (ARDOUR::Properties::queued);
@@ -4646,39 +4677,29 @@ TriggerBox::peek_next_trigger ()
 TriggerPtr
 TriggerBox::trigger_by_id (PBD::ID check)
 {
-	PBD::RWLock::ReaderLock lm (trigger_lock);
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		if (all_triggers[n]->id() == check) {
-			return all_triggers[n];
-		}
-	}
-	return TriggerPtr();
+	TriggerPtr found;
+	for_each_stored ([&] (uint32_t, TriggerPtr const& t) { if (!found && t->id () == check) { found = t; } });
+	return found;
 }
 
 void
 TriggerBox::deep_sources (std::set<std::shared_ptr<Source> >& sources)
 {
-	PBD::RWLock::ReaderLock lm (trigger_lock);
-
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		std::shared_ptr<Region> r (all_triggers[n]->the_region ()); /* Spite: the lock is held already */
-		if (r) {
+	for_each_stored ([&] (uint32_t, TriggerPtr const& t) {
+		if (std::shared_ptr<Region> r = t->the_region ()) {
 			r->deep_sources (sources);
 		}
-	}
+	});
 }
 
 void
 TriggerBox::used_regions (std::set<std::shared_ptr<Region> >& regions)
 {
-	PBD::RWLock::ReaderLock lm (trigger_lock);
-
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		std::shared_ptr<Region> r (all_triggers[n]->the_region ()); /* Spite: the lock is held already */
-		if (r) {
+	for_each_stored ([&] (uint32_t, TriggerPtr const& t) {
+		if (std::shared_ptr<Region> r = t->the_region ()) {
 			regions.insert (r);
 		}
-	}
+	});
 }
 
 
@@ -4693,17 +4714,15 @@ TriggerBox::set_from_selection (uint32_t slot, std::shared_ptr<Region> region)
 {
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("load %1 into %2\n", region->name(), slot));
 
-	if (slot >= all_triggers.size()) {
-		return;
+	if (TriggerPtr const t = stored (slot)) {
+		t->set_region (region);
 	}
-
-	all_triggers[slot]->set_region (region);
 }
 
 void
 TriggerBox::set_from_path (uint32_t slot, std::string const & path)
 {
-	if (slot >= all_triggers.size()) {
+	if (slot >= n_triggers ()) {
 		return;
 	}
 
@@ -4784,7 +4803,9 @@ TriggerBox::set_from_path (uint32_t slot, std::string const & path)
 
 		std::shared_ptr<Region> the_region (RegionFactory::create (src_list, plist2, true));
 
-		all_triggers[slot]->set_region (the_region);
+		if (TriggerPtr const t = stored (slot)) {
+			t->set_region (the_region);
+		}
 
 	} catch (std::exception& e) {
 		error << string_compose ("loading sample from %1 failed (%2)\n", path, e.what()) << endmsg;
@@ -4805,26 +4826,24 @@ TriggerBox::stop_all_immediately ()
 void
 TriggerBox::clear_all_triggers ()
 {
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		all_triggers[n]->set_region (std::shared_ptr<Region>());
-	}
+	for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->set_region (std::shared_ptr<Region>()); });
 }
 
 void
 TriggerBox::clear_cue (int cue)
 {
-	if (cue < 0 || cue >= (int) all_triggers.size ()) { /* Spite */
+	if (cue < 0) {
 		return;
 	}
-	all_triggers[cue]->set_region (std::shared_ptr<Region>());
+	if (TriggerPtr const t = stored (cue)) { /* Spite: past the last scene, or empty */
+		t->set_region (std::shared_ptr<Region>());
+	}
 }
 
 void
 TriggerBox::set_all_launch_style (ARDOUR::Trigger::LaunchStyle ls)
 {
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		all_triggers[n]->set_launch_style (ls);
-	}
+	for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) { t->set_launch_style (ls); });
 	_defaults->set_launch_style (ls); /* Spite: and what empty slots start from */
 	DefaultsChanged (); /* EMIT SIGNAL */
 }
@@ -4832,13 +4851,13 @@ TriggerBox::set_all_launch_style (ARDOUR::Trigger::LaunchStyle ls)
 void
 TriggerBox::set_all_follow_action (ARDOUR::FollowAction const & fa, uint32_t fa_n)
 {
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
+	for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) {
 		if (fa_n == 0) {
-			all_triggers[n]->set_follow_action0 (fa);
+			t->set_follow_action0 (fa);
 		} else {
-			all_triggers[n]->set_follow_action1 (fa);
+			t->set_follow_action1 (fa);
 		}
-	}
+	});
 	if (fa_n == 0) { /* Spite: and what empty slots start from */
 		_defaults->set_follow_action0 (fa);
 	} else {
@@ -4850,9 +4869,7 @@ TriggerBox::set_all_follow_action (ARDOUR::FollowAction const & fa, uint32_t fa_
 void
 TriggerBox::set_all_probability (int zero_to_hundred)
 {
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		all_triggers[n]->set_follow_action_probability (zero_to_hundred);
-	}
+	for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) { t->set_follow_action_probability (zero_to_hundred); });
 	_defaults->set_follow_action_probability (zero_to_hundred); /* Spite: and what empty slots start from */
 	DefaultsChanged (); /* EMIT SIGNAL */
 }
@@ -4860,9 +4877,7 @@ TriggerBox::set_all_probability (int zero_to_hundred)
 void
 TriggerBox::set_all_quantization (Temporal::BBT_Offset const& q)
 {
-	for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-		all_triggers[n]->set_quantization (q);
-	}
+	for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) { t->set_quantization (q); });
 	_defaults->set_quantization (q); /* Spite: and what empty slots start from */
 	DefaultsChanged (); /* EMIT SIGNAL */
 }
@@ -4876,9 +4891,7 @@ TriggerBox::stop_all ()
 
 	DEBUG_TRACE (DEBUG::Triggers, "stop-all request received\n");
 
-	for (uint32_t n = 0; n < all_triggers.size(); ++n) {
-		all_triggers[n]->request_stop ();
-	}
+	for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->request_stop (); });
 
 	_stop_all = true;
 
@@ -4888,9 +4901,7 @@ TriggerBox::stop_all ()
 void
 TriggerBox::stop_all_quantized ()
 {
-	for (uint32_t n = 0; n < all_triggers.size(); ++n) {
-		all_triggers[n]->stop_quantized ();
-	}
+	for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->stop_quantized (); });
 }
 
 void
@@ -4929,7 +4940,8 @@ TriggerBox::trigger (Triggers::size_type n)
 {
 	PBD::RWLock::ReaderLock lm (trigger_lock);
 
-	if (n >= all_triggers.size()) {
+	TriggerPtr const& t (slot_rt (n));
+	if (!t) {
 		return 0;
 	}
 
@@ -4938,11 +4950,11 @@ TriggerBox::trigger (Triggers::size_type n)
 	 * (unlimited-scenes plan): for finding the callers that assume one
 	 */
 	static bool const null_empty = g_getenv ("SPITE_NULL_EMPTY_SLOTS") && *g_getenv ("SPITE_NULL_EMPTY_SLOTS") == '1';
-	if (null_empty && default_empty (*all_triggers[n])) {
+	if (null_empty && default_empty (*t)) {
 		return 0;
 	}
 
-	return all_triggers[n];
+	return t;
 }
 
 bool
@@ -4954,48 +4966,41 @@ TriggerBox::default_empty (Trigger const& t) const
 bool
 TriggerBox::slot_empty (uint32_t n) const
 {
-	PBD::RWLock::ReaderLock lm (trigger_lock);
-	if (n >= all_triggers.size ()) {
-		return true;
-	}
-	Trigger const& t (*all_triggers[n]);
-	return !t.playable () && !t.the_region () && !t.has_pending ();
+	TriggerPtr const t (stored (n));
+	return !t || (!t->playable () && !t->the_region () && !t->has_pending ());
 }
 
 uint32_t
 TriggerBox::n_clips () const
 {
-	PBD::RWLock::ReaderLock lm (trigger_lock);
 	uint32_t c = 0;
-	for (auto const& t : all_triggers) {
+	for_each_stored ([&] (uint32_t, TriggerPtr const& t) {
 		if (t->playable () || t->the_region () || t->has_pending ()) {
 			++c;
 		}
-	}
+	});
 	return c;
 }
 
 int32_t
 TriggerBox::nth_clip_scene (uint32_t i) const
 {
-	PBD::RWLock::ReaderLock lm (trigger_lock);
-	for (uint32_t n = 0; n < all_triggers.size (); ++n) {
-		Trigger const& t (*all_triggers[n]);
-		if (t.playable () || t.the_region () || t.has_pending ()) {
+	int32_t scene = -1;
+	for_each_stored ([&] (uint32_t n, TriggerPtr const& t) {
+		if (scene < 0 && (t->playable () || t->the_region () || t->has_pending ())) {
 			if (i-- == 0) {
-				return n;
+				scene = n;
 			}
 		}
-	}
-	return -1;
+	});
+	return scene;
 }
 
 TriggerPtr
 TriggerBox::materialize (uint32_t n)
 {
 	/* the slot's own Trigger, even with SPITE_NULL_EMPTY_SLOTS */
-	PBD::RWLock::ReaderLock lm (trigger_lock);
-	return n < all_triggers.size () ? all_triggers[n] : TriggerPtr ();
+	return stored (n);
 }
 
 void
@@ -5029,8 +5034,8 @@ TriggerBox::clear_slot (uint32_t n)
 bool
 TriggerBox::has_stop (uint32_t n) const
 {
-	PBD::RWLock::ReaderLock lm (trigger_lock);
-	return n >= all_triggers.size () || !all_triggers[n]->cue_isolated ();
+	TriggerPtr const t (stored (n));
+	return !t || !t->cue_isolated ();
 }
 
 void
@@ -5063,9 +5068,7 @@ TriggerBox::configure_io (ChanCount in, ChanCount out)
 	bool ret = Processor::configure_io (in, out);
 
 	if (ret) {
-		for (uint32_t n = 0; n < all_triggers.size(); ++n) {
-			all_triggers[n]->io_change ();
-		}
+		for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->io_change (); });
 	}
 	return ret;
 }
@@ -5094,7 +5097,7 @@ uint32_t
 TriggerBox::n_triggers () const
 {
 	PBD::RWLock::ReaderLock lm (trigger_lock);
-	return all_triggers.size ();
+	return scene_count_rt ();
 }
 
 static TriggerPtr
@@ -5142,12 +5145,15 @@ TriggerBox::slot_removable (uint32_t at) const
 {
 	PBD::RWLock::ReaderLock lm (trigger_lock);
 
-	if (at >= all_triggers.size () || all_triggers.size () < 2) {
+	if (at >= scene_count_rt () || scene_count_rt () < 2) {
 		return false;
 	}
 
 	/* only an empty slot: no clip, none being loaded or recorded into */
-	TriggerPtr const & t (all_triggers[at]);
+	TriggerPtr const & t (slot_rt (at));
+	if (!t) {
+		return true;
+	}
 	if (t->playable () || t->the_region () || t->has_pending ()) {
 		return false;
 	}
@@ -5471,11 +5477,11 @@ TriggerBox::handle_stopped_trigger (BufferSet& bufs, pframes_t dest_offset)
 		}
 		if ((int) _currently_playing->index() == n) {
 			start_quantization = Temporal::BBT_Offset ();
-			DEBUG_TRACE (DEBUG::Triggers, string_compose ("switching to next trigger %1, will use start immediately \n", all_triggers[n]->name()));
+			DEBUG_TRACE (DEBUG::Triggers, string_compose ("switching to next trigger %1, will use start immediately \n", slot_rt (n)->name()));
 		} else {
-			DEBUG_TRACE (DEBUG::Triggers, string_compose ("switching to next trigger %1\n", all_triggers[n]->name()));
+			DEBUG_TRACE (DEBUG::Triggers, string_compose ("switching to next trigger %1\n", slot_rt (n)->name()));
 		}
-		_currently_playing = all_triggers[n];
+		_currently_playing = slot_rt (n);
 		_currently_playing->startup (bufs, dest_offset, start_quantization);
 		send_property_change (Properties::currently_playing);
 	} else {
@@ -5603,13 +5609,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 
 	if (_active_scene >= 0) {
 		DEBUG_TRACE (DEBUG::Triggers, string_compose ("tb noticed active scene %1\n", _active_scene));
-		if (_active_scene < (int32_t) all_triggers.size()) {
-			if (!all_triggers[_active_scene]->cue_isolated()) {
-				if (all_triggers[_active_scene]->playable()) {
+		if (_active_scene < (int32_t) scene_count_rt ()) {
+			TriggerPtr const& scene_slot (slot_rt (_active_scene)); /* Spite: null for an empty slot */
+			if (!scene_slot || !scene_slot->cue_isolated()) {
+				if (scene_slot && scene_slot->playable()) {
 					if (_currently_playing) {
 						_currently_playing->set_scene_switch (true);
 					}
-					all_triggers[_active_scene]->bang ();
+					scene_slot->bang ();
 				} else {
 					stop_all_quantized ();  //empty slot, this should work as a Stop for the running clips
 
@@ -5635,9 +5642,7 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 	 * may bang a slot in this very cycle
 	 */
 	if (_state_requests_queued.exchange (false)) {
-		for (auto & trig : all_triggers) {
-			trig->process_state_requests (bufs, nframes - 1);
-		}
+		for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) { t->process_state_requests (bufs, nframes - 1); });
 	}
 
 	/* cue handling is over at this point, reset _active_scene to reflect this */
@@ -5652,20 +5657,18 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 	 * The playing slot's waits until it stops: look again next cycle.
 	 */
 	if (_slot_swaps_queued.exchange (false)) {
-		for (uint32_t n = 0; n < all_triggers.size(); ++n) {
-			if (all_triggers[n] != _currently_playing) {
-				maybe_swap_pending (n, bufs, start_sample);
-			} else if (all_triggers[n]->has_pending ()) {
+		for_each_stored_rt ([&] (uint32_t n, TriggerPtr const& t) {
+			if (t != _currently_playing) {
+				maybe_swap_pending (n, bufs, start_sample); /* may replace t */
+			} else if (t->has_pending ()) {
 				_slot_swaps_queued.store (true);
 			}
-		}
+		});
 	}
 
 	/* Spite: only when a slot has posted an edit (queue_edit_swap_check ()) */
 	if (_edit_swaps_queued.exchange (false)) {
-		for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-			all_triggers[n]->check_edit_swap (timepos_t (start_sample), _currently_playing == all_triggers[n], bufs);
-		}
+		for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) { t->check_edit_swap (timepos_t (start_sample), _currently_playing == t, bufs); });
 	}
 
 	/* if there is no active slot, see if there any queued up
@@ -5679,14 +5682,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 		 */
 		uint32_t n;
 		while (explicit_queue.read (&n, 1) == 1) {
-			if (n >= all_triggers.size ()) {
+			if (!slot_rt (n)) {
 				continue;
 			}
 			maybe_swap_pending (n, bufs, start_sample);
-			if (!all_triggers[n]->playable ()) {
+			if (!slot_rt (n)->playable ()) {
 				continue;
 			}
-			_currently_playing = all_triggers[n];
+			_currently_playing = slot_rt (n);
 			_currently_playing->startup (bufs, 0);
 			send_property_change (Properties::currently_playing);
 			active_trigger_boxes.fetch_add (1);
@@ -5728,9 +5731,7 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 		 */
 
 		if (_property_updates_queued.exchange (false)) {
-			for (auto & trig : all_triggers) {
-				trig->update_properties();
-			}
+			for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->update_properties(); });
 		}
 
 		return;
@@ -5741,14 +5742,14 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 	 */
 
 	if (_property_updates_queued.exchange (false)) {
-		for (auto & trig : all_triggers) {
+		for_each_stored_rt ([&] (uint32_t, TriggerPtr const& trig) {
 			if (trig != _currently_playing) {
 				trig->update_properties();
 			} else if (trig->ui_state_pending ()) {
 				/* Spite: applied when it retriggers, or caught up once it stops */
 				_property_updates_queued.store (true);
 			}
-		}
+		});
 	}
 
 	/* transport must be active for triggers */
@@ -5813,13 +5814,13 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 
 			uint32_t n = *(rwv.buf[0]);
 
-			if (n >= all_triggers.size () || (!all_triggers[n]->playable () && !all_triggers[n]->has_pending ())) {
+			if (!slot_rt (n) || (!slot_rt (n)->playable () && !slot_rt (n)->has_pending ())) {
 				/* Spite: a launch queued for a slot without a clip */
 				explicit_queue.increment_read_idx (1);
 				continue;
 			}
 
-			nxt = all_triggers[n];
+			nxt = slot_rt (n);
 
 			/* if user triggered same clip, that will have been handled as
 			 * it processed bang requests. Nothing to do here otherwise.
@@ -5843,7 +5844,7 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 					/* starting up next trigger, check for pending */
 
 					maybe_swap_pending (n, bufs, start_sample);
-					nxt = all_triggers[n];
+					nxt = slot_rt (n);
 
 					nxt->jump_start ();
 					_currently_playing->jump_stop (bufs, dest_offset);
@@ -5862,7 +5863,7 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 
 						/* starting up next trigger, check for pending */
 						maybe_swap_pending (n, bufs, start_sample);
-						nxt = all_triggers[n];
+						nxt = slot_rt (n);
 
 						nxt->startup (bufs, dest_offset);
 						DEBUG_TRACE (DEBUG::Triggers, string_compose ("%1 was finished, started %2\n", _currently_playing->index(), nxt->index()));
@@ -5988,20 +5989,23 @@ TriggerBox::determine_next_trigger (uint32_t current)
 	uint32_t runnable = 0;
 
 	/* count number of triggers that can actually be run (i.e. they have a
-	 * region). Spite: all that matters below is none, one or more.
+	 * region). Spite: all that matters below is none, one or more. Only
+	 * stored slots are looked at: an empty slot may have nothing stored.
 	 */
 
-	for (uint32_t n = 0; n < all_triggers.size() && runnable < 2; ++n) {
-		if (all_triggers[n]->playable()) {
+	for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) {
+		if (runnable < 2 && t->playable()) {
 			runnable++;
 		}
-	}
+	});
 
-	if (runnable == 0 || !all_triggers[current]->playable()) {
+	TriggerPtr const& cur (slot_rt (current));
+
+	if (runnable == 0 || !cur || !cur->playable()) {
 		return -1;
 	}
 
-	if (all_triggers[current]->follow_action0 ().type == FollowAction::None) {
+	if (cur->follow_action0 ().type == FollowAction::None) {
 		/* when left follow action is disabled, no follow action */
 		return -1;
 	}
@@ -6013,17 +6017,17 @@ TriggerBox::determine_next_trigger (uint32_t current)
 	int r = _pcg.rand (100); // 0 .. 99
 	FollowAction fa;
 
-	if (r >= all_triggers[current]->follow_action_probability()) {
-		fa = all_triggers[current]->follow_action0 ();
+	if (r >= cur->follow_action_probability()) {
+		fa = cur->follow_action0 ();
 	} else {
-		fa = all_triggers[current]->follow_action1 ();
+		fa = cur->follow_action1 ();
 	}
 
 	/* first switch: deal with the "special" cases where we either do
 	 * nothing or just repeat the current trigger
 	 */
 
-	DEBUG_TRACE (DEBUG::Triggers, string_compose ("choose next trigger using follow action %1 given prob %2 and rnd %3\n", fa.to_string(), all_triggers[current]->follow_action_probability(), r));
+	DEBUG_TRACE (DEBUG::Triggers, string_compose ("choose next trigger using follow action %1 given prob %2 and rnd %3\n", fa.to_string(), cur->follow_action_probability(), r));
 
 	if (fa.type == FollowAction::Stop) {
 		return -1;
@@ -6036,6 +6040,9 @@ TriggerBox::determine_next_trigger (uint32_t current)
 		return current;
 	}
 
+	/* Spite: a slot a follow action can go to */
+	auto candidate = [] (TriggerPtr const& t) { return t->playable() && !t->active(); };
+
 	/* second switch: handle the "real" follow actions */
 
 	switch (fa.type) {
@@ -6045,58 +6052,74 @@ TriggerBox::determine_next_trigger (uint32_t current)
 	case FollowAction::Again:
 		return current;
 
-	case FollowAction::ForwardTrigger:
-		n = current;
-		while (true) {
-			++n;
-
-			if (n >= all_triggers.size()) {
-				n = 0;
+	case FollowAction::ForwardTrigger: {
+		/* the next candidate after the current slot, wrapping around */
+		int32_t after = -1, first = -1;
+		for_each_stored_rt ([&] (uint32_t n, TriggerPtr const& t) {
+			if (n == current || !candidate (t)) {
+				return;
 			}
-
-			if (n == current) {
-				break;
+			if (n > current && after < 0) {
+				after = n;
 			}
-
-			if (all_triggers[n]->playable() && !all_triggers[n]->active()) {
-				return n;
+			if (first < 0) {
+				first = n;
 			}
+		});
+		if (after >= 0) {
+			return after;
+		}
+		if (first >= 0 && (uint32_t) first < current) {
+			return first;
 		}
 		break;
+	}
 
-	case FollowAction::ReverseTrigger:
-		n = current;
-		while (true) {
-			if (n == 0) {
-				n = all_triggers.size() - 1;
-			} else {
-				n -= 1;
+	case FollowAction::ReverseTrigger: {
+		/* the previous candidate before the current slot, wrapping around */
+		int32_t before = -1, last = -1;
+		for_each_stored_rt ([&] (uint32_t n, TriggerPtr const& t) {
+			if (n == current || !candidate (t)) {
+				return;
 			}
-
-			if (n == current) {
-				break;
+			if (n < current) {
+				before = n;
 			}
-
-			if (all_triggers[n]->playable() && !all_triggers[n]->active ()) {
-				return n;
-			}
+			last = n;
+		});
+		if (before >= 0) {
+			return before;
+		}
+		if (last >= 0 && (uint32_t) last > current) {
+			return last;
 		}
 		break;
+	}
 
-	case FollowAction::FirstTrigger:
-		for (n = 0; n < all_triggers.size(); ++n) {
-			if (all_triggers[n]->playable() && !all_triggers[n]->active ()) {
-				return n;
+	case FollowAction::FirstTrigger: {
+		int32_t first = -1;
+		for_each_stored_rt ([&] (uint32_t n, TriggerPtr const& t) {
+			if (first < 0 && candidate (t)) {
+				first = n;
 			}
+		});
+		if (first >= 0) {
+			return first;
 		}
 		break;
-	case FollowAction::LastTrigger:
-		for (int i = all_triggers.size() - 1; i >= 0; --i) {
-			if (all_triggers[i]->playable() && !all_triggers[i]->active ()) {
-				return i;
+	}
+	case FollowAction::LastTrigger: {
+		int32_t last = -1;
+		for_each_stored_rt ([&] (uint32_t n, TriggerPtr const& t) {
+			if (candidate (t)) {
+				last = n;
 			}
+		});
+		if (last >= 0) {
+			return last;
 		}
 		break;
+	}
 
 	case FollowAction::JumpTrigger: {
 		/* Spite: pick one of the playable targets, each as likely, in one
@@ -6105,16 +6128,15 @@ TriggerBox::determine_next_trigger (uint32_t current)
 		 */
 		int32_t  pick = -1;
 		uint32_t seen = 0;
-		for (std::size_t n = 0; n < std::min (all_triggers.size (), fa.targets.size ()); ++n) {
-			if (fa.targets.test (n) && all_triggers[n]->playable()) {
+		for_each_stored_rt ([&] (uint32_t n, TriggerPtr const& t) {
+			if (n < fa.targets.size () && fa.targets.test (n) && t->playable()) {
 				if (_pcg.rand (++seen) == 0) {
 					pick = n;
 				}
 			}
-		}
+		});
 		return pick;
 	}
-
 
 	/* NOTREACHED */
 	case FollowAction::Stop:
@@ -6135,12 +6157,7 @@ TriggerBox::get_state () const
 	node.set_property (X_("order"), _order);
 	XMLNode* trigger_child (new XMLNode (X_("Triggers")));
 
-	{
-		PBD::RWLock::ReaderLock lm (trigger_lock);
-		for (auto const & t : all_triggers) {
-			trigger_child->add_child_nocopy (t->get_state());
-		}
-	}
+	for_each_stored ([&] (uint32_t, TriggerPtr const& t) { trigger_child->add_child_nocopy (t->get_state()); });
 
 	node.add_child_nocopy (*trigger_child);
 
@@ -6177,12 +6194,12 @@ TriggerBox::set_state (const XMLNode& node, int version)
 			*/
 
 			if (_data_type == DataType::AUDIO) {
-				trig.reset (new AudioTrigger (all_triggers.size(), *this), Trigger::request_trigger_delete);
-				all_triggers.push_back (trig);
+				trig.reset (new AudioTrigger (scene_count_rt (), *this), Trigger::request_trigger_delete);
+				append_slot (trig);
 				trig->set_state (*tchild, version);
 			} else if (_data_type == DataType::MIDI) {
-				trig.reset (new MIDITrigger (all_triggers.size(), *this), Trigger::request_trigger_delete);
-				all_triggers.push_back (trig);
+				trig.reset (new MIDITrigger (scene_count_rt (), *this), Trigger::request_trigger_delete);
+				append_slot (trig);
 				trig->set_state (*tchild, version);
 			}
 			if (trig->playable ()) {
@@ -6274,9 +6291,7 @@ TriggerBox::realtime_handle_transport_stopped ()
 	stop_all ();
 	_currently_playing = 0;
 
-	for (auto & trig : all_triggers) {
-		trig->disarm ();
-	}
+	for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->disarm (); });
 }
 
 void
@@ -6284,9 +6299,7 @@ TriggerBox::non_realtime_transport_stop (samplepos_t now, bool /*flush*/)
 {
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("%1 (%3): non-realtime stop at %2 (lat-adjusted to %4) PO %5 OL %6\n", order(), now, this, now + playback_offset(), playback_offset(), output_latency()));
 
-	for (auto & t : all_triggers) {
-		t->shutdown_from_fwd ();
-	}
+	for_each_stored_rt ([] (uint32_t, TriggerPtr const& t) { t->shutdown_from_fwd (); });
 
 	fast_forward (_session.cue_events(), now);
 }
@@ -6296,13 +6309,13 @@ TriggerBox::non_realtime_locate (samplepos_t now)
 {
 	DEBUG_TRACE (DEBUG::Triggers, string_compose ("%1 (%3): non-realtime locate at %2 (lat-adjusted to %4) PO %5 OL %6\n", order(), now, this, now + playback_offset(), playback_offset(), output_latency()));
 
-	for (auto & t : all_triggers) {
+	for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) {
 		if (t->armed() && _arm_info) {
 			setup_arm_info_bounds (*_arm_info, now, *t, t->capture_duration());
 		} else {
 			t->shutdown_from_fwd ();
 		}
-	}
+	});
 
 	fast_forward (_session.cue_events(), now);
 }
@@ -6321,9 +6334,7 @@ void
 TriggerBox::dump (std::ostream & ostr) const
 {
 	ostr << "TriggerBox " << order() << std::endl;
-	for (auto const & t : all_triggers) {
-		ostr << "\tTrigger " << t->index() << " state " << enum_2_string (t->state()) << std::endl;
-	}
+	for_each_stored_rt ([&] (uint32_t, TriggerPtr const& t) { ostr << "\tTrigger " << t->index() << " state " << enum_2_string (t->state()) << std::endl; });
 }
 
 /* Thread */

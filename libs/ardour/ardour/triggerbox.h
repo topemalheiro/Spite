@@ -951,7 +951,7 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	/* the next trigger queued to start, for surfaces (not the audio thread) */
 	TriggerPtr peek_next_trigger ();
 	/* Spite: slot n's trigger, for the audio thread (no lock) */
-	TriggerPtr trigger_rt (uint32_t n) const { return n < all_triggers.size () ? all_triggers[n] : TriggerPtr (); }
+	TriggerPtr trigger_rt (uint32_t n) const { return slot_rt (n); }
 	PBD::Signal<void()> EmptyStatusChanged;
 
 	int32_t order() const { return _order; }
@@ -1110,6 +1110,31 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	int32_t _order;
 	mutable PBD::RWLock trigger_lock; /* protects all_triggers */
 	Triggers all_triggers;
+
+	/* Spite: the slots' storage (all_triggers) is reached only through
+	 * these (unlimited-scenes plan, step 3), so that it can become sparse:
+	 * then only slots that hold something are stored, and the audio thread
+	 * reads a snapshot. A scene with nothing stored is an empty slot.
+	 */
+	static TriggerPtr const _no_trigger;
+	/* the audio thread (and code that ran without a lock so far) */
+	TriggerPtr const& slot_rt (uint32_t scene) const { return scene < all_triggers.size () ? all_triggers[scene] : _no_trigger; }
+	uint32_t scene_count_rt () const { return all_triggers.size (); }
+	template<typename F> void for_each_stored_rt (F f) const {
+		for (uint32_t n = 0; n < all_triggers.size (); ++n) { f (n, all_triggers[n]); }
+	}
+	/* other threads: with the storage's reader lock */
+	template<typename F> void for_each_stored (F f) const {
+		PBD::RWLock::ReaderLock lm (trigger_lock);
+		for_each_stored_rt (f);
+	}
+	TriggerPtr stored (uint32_t scene) const {
+		PBD::RWLock::ReaderLock lm (trigger_lock);
+		return slot_rt (scene);
+	}
+	/* writers */
+	void append_slot (TriggerPtr);                      /* constructor, set_state () */
+	void replace_slot_rt (uint32_t scene, TriggerPtr);  /* the audio thread swapping a new trigger in */
 
 
 	/* Spite: see queue_edit_swap_check (). True to start: look once. */
