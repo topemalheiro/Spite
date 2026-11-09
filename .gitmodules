@@ -1,4 +1,4 @@
 [submodule "plugdata"]
 	path = plugdata
-	url = https://github.com/topemalheiro/plugdata.git
+	url = ../plugdata-private.git
 	branch = debug-mode-visualizer
