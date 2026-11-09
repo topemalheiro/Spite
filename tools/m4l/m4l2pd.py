@@ -28,10 +28,10 @@ plugdata patch.
     m4l2pd.py [--objects old|new] DEVICE.amxd OUTDIR   -> OUTDIR/<name>/<name>.pd (+ abstractions)
     m4l2pd.py [--objects old|new] --install [--data DIR] [--lv2 DIR] DEVICE.amxd...
 
---objects new uses PgD4S's own objects and options for Max for Live devices
-(knob names and needles, Live's number boxes, [spite.tab], [pcontrol],
-[thispatcher], subpatches that open in presentation); the default, old, uses
-stock plugdata objects and stand-in subpatches.
+The patch uses PgD4S's own objects and options for Max for Live devices (knob
+names and needles, Live's number boxes, [spite.tab], [pcontrol], [thispatcher],
+subpatches that open in presentation). --objects old writes stock plugdata
+objects and stand-in subpatches instead, for PgD4S builds older than those.
 
 --install converts into ~/.local/share/spite9/m4l/<name>/ and writes one LV2
 preset per converted device into ~/.lv2/spite-m4l.lv2/, for plugdata-fx
@@ -153,8 +153,9 @@ def num(v, default=0):
 
 # PgD4S's own objects and options for Max for Live devices (see tools/m4l/README.md):
 # knob and number box attributes, [spite.tab], [pcontrol], [thispatcher], subpatches that open
-# in presentation. Off ('old'): stock plugdata objects and stand-in subpatches.
-NEW_OBJECTS = False
+# in presentation. Off (--objects old, for PgD4S builds before them): stock plugdata objects
+# and stand-in subpatches.
+NEW_OBJECTS = True
 
 # Max names whose plugdata object differs or needs a library prefix. Names not
 # listed pass through: plugdata registers cyclone's Max clones under their
@@ -577,6 +578,12 @@ INTER = [576, 589, 954, 1297, 1314, 2011, 1319, 614, 747, 747, 1026, 1355, 590, 
 TEXT_H = 21  # a one-line text box in plugdata: max (text height + 5, 20)
 
 
+def text_height(pt):
+    """Max's font size (points, the em at 72 dpi) -> the height plugdata gives JUCE for the same
+    text (ascent + descent: Inter's (1984 + 494) / 2048 em)"""
+    return num(pt) * 2478 / 2048.0
+
+
 def inter_width(text, height=15.0):
     return sum(INTER[ord(c) - 32] if 32 <= ord(c) < 127 else 1150 for c in text) * height / 2478.0
 
@@ -695,26 +702,29 @@ def dial(b, xy, rect, face):
             steps = int(abs(hi - lo)) + 1
         lo, hi, exp = 0, 1, 1
     fg = color(b.get('activeneedlecolor') or b.get('activedialcolor'), LIVE['arc'])
-    # live.dial's arc always starts at its minimum, bipolar range or not
-    knob = ('else/knob %d %s %s %s %s empty empty %s %s %s 0 0 %d %d 1 300 0 0 %s empty empty %d 11 %d %d 0 %d 0 0 0 1'
+    textsize = int(round(text_height(b.get('fontsize', 9.5))))
+    # live.dial's arc always starts at its minimum, bipolar range or not. The value shows under
+    # the knob: centred on it with PgD4S's numberalign, else from its left
+    knob = ('else/knob %d %s %s %s %s empty empty %s %s %s 0 0 %d %d 1 300 0 0 %s empty empty %d %d %d %d 0 %d 0 0 0 1'
             % (size, lo, hi, 0 if exp == 1 else exp, init, LIVE['bg'], LIVE['track'], fg, steps,
                1 if v.get('parameter_type') == 1 else 0, lo, 1 if shownumber else 0,
-               int(size / 2) - 12, size + 1, 1 if init_on else 0))
+               textsize if NEW_OBJECTS else 11, 0 if NEW_OBJECTS else int(size / 2) - 12,
+               size + 3 if NEW_OBJECTS else size + 1, 1 if init_on else 0))
     x, y = xy
     objs = [PdObj('#X obj %d %d %s;' % (x + kx, y + ky, knob), (x + kx, y + ky, size + 1, size + 1),
                   1, 1, (int(face[0]) + kx, int(face[1]) + ky) if face else None)]
     if NEW_OBJECTS:
         if showname:
             name = v.get('parameter_shortname') or v.get('parameter_longname') or ''
-            objs[0].attrs += [('name', pd_symbol_words(name)), ('namesize', '10'),
-                              ('namecolor', color(b.get('textcolor'), LIVE['text']))]
+            objs[0].attrs += [('name', pd_symbol_words(name)), ('namesize', str(textsize))]
+        objs[0].attrs.append(('textcolor', color(b.get('textcolor'), LIVE['text'])))
         if appearance == 1:
-            objs[0].attrs.append(('needle', 'plain'))
+            objs[0].attrs.append(('needle', 'plain'))  # Live's tiny dial: a needle, no arc
         if shownumber and not unit:
             u = UNITS.get(int(num(v.get('parameter_unitstyle', 1))), '')
             if u:
                 objs[0].attrs.append(('unit', u))
-            objs[0].attrs.append(('decimals', str(live_decimals(v, w))))
+            objs[0].attrs += [('decimals', str(live_decimals(v, w))), ('numberalign', 'center')]
         showname = False
     if showname:
         name = v.get('parameter_shortname') or v.get('parameter_longname') or ''
@@ -776,7 +786,7 @@ def numbox(b, xy, rect, face):
     # Live's small numbers: plugdata draws nbx text fs + 3 px high and the box
     # fs * 31 / 36 px a digit + height / 2 + 5 wide (NumberObject::calcFontWidth): as many
     # digits as fit Max's width, the unit (as the label) inside the box's right end
-    fs = max(6, int(round(num(b.get('fontsize', 9)))) - 2)
+    fs = max(5, int(round(text_height(b.get('fontsize', 9)))) - 3)
     hh = max(8, int(round(h)) - 1)
     unit_w = int(round(inter_width(unit, fs + 3))) + 3 if unit else 0
     digits = max(1, int(round((w - unit_w - 5 - hh // 2) * 36.0 / (fs * 31))))
@@ -811,8 +821,8 @@ def popmenu(b, xy, rect, face):
     init = int(num((v.get('parameter_initial') or [0])[0] if isinstance(v.get('parameter_initial'), list) else v.get('parameter_initial', 0)))
     w, h = int(rect[2]), int(rect[3])
     fg = color(b.get('lcdcolor') or b.get('textcolor'), LIVE['value'])
-    # ELSE's popmenu text is 1.5 x its font size in px: Live's 9.5 pt menu text is about font 7
-    fs = max(6, int(round(num(b.get('fontsize', 9.5)) * 0.75)))
+    # ELSE's popmenu text is 1.5 x its font size high: Live's 9.5 pt menu text is font 8
+    fs = max(6, int(round(text_height(b.get('fontsize', 9.5)) / 1.5)))
     menu = ('#X obj %d %d popmenu %d %d %d %s %s empty empty empty empty empty 0 0 %d %d 0 1 0 0 0 0 0 %s;'
             % (xy[0], xy[1], max(w, 20), max(h, 12), fs, LIVE['bg'], fg, init, 1 if init_on else 0,
                ' '.join(pd_symbol(i) for i in items)))
@@ -864,9 +874,13 @@ def spite_tab(b, xy, rect, face, conv):
         else:
             conv.warn('picture %s is not in the device' % base)
             pics.append('-')
-    fs = max(6, int(round(num(b.get('fontsize', 9.5)))))
+    fs = max(6, int(round(text_height(b.get('fontsize', 9.5)))))
+    cols = max(1, -(-n // rows))
+    # Max's rounded is the corners' radius, at most half a cell (24 on Flechtwerk's 17 px cells: round ends)
+    cell = min((w - spacing * (cols - 1)) / float(cols), (h - spacing * (rows - 1)) / float(rows))
+    radius = int(max(0, min(num(b.get('rounded', 0)), cell / 2)))
     line = ('#X obj %d %d spite.tab %d %d %d 0 %d %d %d %s %s %s %s empty empty %d %d %d %s%s;'
-            % (xy[0], xy[1], w, h, rows, spacing, int(num(b.get('rounded', 0)) > 0) * 3, fs,
+            % (xy[0], xy[1], w, h, rows, spacing, radius, fs,
                color(b.get('bgcolor'), LIVE['cell']), color(b.get('textcolor'), LIVE['text']),
                color(b.get('bgoncolor') or b.get('activebgoncolor'), LIVE['cellon']),
                color(b.get('textoncolor') or b.get('activetextoncolor'), '#ffffff'),
@@ -964,10 +978,13 @@ def panel(b, xy, rect, face):
 
 
 def comment(b, xy, rect, face):
-    size = max(8, int(round(num(b.get('fontsize', 10)))))  # [note]'s size is its font height in px
+    size = max(8, int(round(text_height(b.get('fontsize', 10)))))  # [note]'s size is its text height
     col = color(b.get('textcolor'), LIVE['text'])
-    return Tr(note(b.get('text', ''), xy, int(rect[2]), col, int(num(b.get('textjustification', 0))),
-                   (int(face[0]), int(face[1])) if face else None, size), nout=0)
+    just = int(num(b.get('textjustification', 0)))
+    # plugdata insets a left-aligned note's text 7 px, Max a comment's 2: start the note 5 px left
+    dx = -5 if just == 0 else 0
+    return Tr(note(b.get('text', ''), (xy[0] + dx, xy[1]), int(rect[2]) - dx, col, just,
+                   (int(face[0]) + dx, int(face[1])) if face else None, size), nout=0)
 
 
 def line(b, xy, rect, face):
@@ -1185,7 +1202,8 @@ class Converter:
             count += len(tr.objs)
         extra = [PdObj('#X obj 0 0 namecanvas \\$0-%s;' % n, text_bounds(0, 0, 'namecanvas $0-' + n, 0, 0), 0, 0)
                  for n in ([own] if own else []) + list(names)]
-        place = self.layout(ports, extra)
+        # a bpatcher showing its patching view frames a region of it: Max's coordinates exactly
+        place = self.layout(ports, extra, exact=bool(gop) and not p.get('openinpresentation'))
         for base, tr, b in ports.values():
             for k, o in enumerate(tr.objs):
                 lines.extend(o.lines)
@@ -1261,7 +1279,7 @@ class Converter:
                     lines.append('#X attr %d %s %s;' % (base + k, key, value))
         return lines
 
-    def layout(self, ports, extra):
+    def layout(self, ports, extra, exact=False):
         """Max's patching layout in plugdata's sizes. plugdata draws box text bigger than Max
         (Inter at 15 px against Arial at 10 or 12 pt), so the layout is widened by the factor
         that fits Max's boxes to their text, and every text box keeps its Max width in that
@@ -1278,7 +1296,7 @@ class Converter:
             skip = b.get('background') or b.get('maxclass') in ('panel', 'live.line', 'fpic', 'live.colors', 'swatch')
             units.append({'objs': tr.objs, 'max': r, 'skip': skip, 'text': main.kind is not None})
         ratios.sort()
-        sx = min(max(ratios[int(0.8 * (len(ratios) - 1))], 1.0), 1.6) if ratios else 1.0
+        sx = min(max(ratios[int(0.8 * (len(ratios) - 1))], 1.0), 1.6) if ratios and not exact else 1.0
         gap = 4
 
         def bbox(u):
@@ -1303,7 +1321,7 @@ class Converter:
             if main.kind and main.bounds:
                 main.set_width(w * sx)
             move(u, int(round(x * sx)) - int(x), 0)
-        live = [u for u in units if not u['skip'] and u['pd']]
+        live = [u for u in units if not u['skip'] and u['pd'] and not exact]
         # within a row (boxes side by side in Max): push to the right
         placed = []
         for u in sorted(live, key=lambda u: u['m'][0]):
@@ -1426,7 +1444,7 @@ class Converter:
             if name == 'live.colors' and used - {0}:
                 return sub(inert_sub(xy, 'live.colors', max(nout, 1)), 'live.colors', 1, max(nout, 1))
             if name in ('pcontrol', 'thispatcher') and NEW_OBJECTS:
-                return obj(name, 1)
+                return obj(name, 1 if name == 'pcontrol' else 2)
             if name == 'pcontrol':
                 return sub(self.pcontrol_sub(xy, b.get('_opens', [])), 'pcontrol', 1, 1)
             if name == 'thispatcher':
