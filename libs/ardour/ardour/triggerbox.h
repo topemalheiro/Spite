@@ -1128,6 +1128,7 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	std::atomic<uint64_t>         _slots_gen {0};
 	std::shared_ptr<SlotMap const> _rt_slots;  /* the audio thread's */
 	std::atomic<uint32_t>         _next_load_id {1};
+	uint32_t                      _loaded_slot_count = 0; /* see take_loaded_slot_count () */
 
 	static TriggerPtr const _no_trigger;
 	/* the audio thread */
@@ -1175,6 +1176,11 @@ public:
 	ShiftPlan prepare_shift (uint32_t at, int delta);
 	void commit_shift (ShiftPlan&);
 	uint32_t last_scene_plus_one () const;
+	/* Spite: the slot count of the dense file this box was loaded from (0
+	 * once taken, or for a sparse file): Session::sync_scenes () sizes the
+	 * session by it once, so trailing empty scenes of old sessions stay
+	 */
+	uint32_t take_loaded_slot_count () { uint32_t const n = _loaded_slot_count; _loaded_slot_count = 0; return n; }
 	/* Spite: drop empty slots that differ in nothing from the defaults (GUI idle, after loading) */
 	void reap ();
 	/* Spite: free maps nobody reads any more */

@@ -6499,6 +6499,8 @@ TriggerBox::set_state (const XMLNode& node, int version)
 	_active_slots.store (active);
 	if (!sparse) {
 		_session.loaded_dense_triggers ();
+		/* every scene had a node: the scene count, trailing empty ones included */
+		_loaded_slot_count = tchildren.size ();
 	}
 	publish (m);
 

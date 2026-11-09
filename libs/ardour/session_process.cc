@@ -1888,6 +1888,7 @@ Session::sync_scenes ()
 		std::shared_ptr<TriggerBox> tb = r->triggerbox ();
 		if (tb) {
 			n = std::max (n, tb->last_scene_plus_one ());
+			n = std::max (n, tb->take_loaded_slot_count ()); /* a dense file: its empty scenes too */
 		}
 	}
 	n = std::min<uint32_t> (n, TriggerBox::max_triggers_per_box);
