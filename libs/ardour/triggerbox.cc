@@ -3363,6 +3363,7 @@ MIDITrigger::midi_run (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 		}
 
 		assert (false);
+		return nframes; /* Spite: silence rather than a crash in an optimized build */
 	}
 
 	MidiBuffer* mb (in_process_context? &bufs.get_midi (0) : nullptr);
@@ -4546,6 +4547,12 @@ TriggerBox::maybe_swap_pending (uint32_t slot)
 			p->set_index (slot);
 			all_triggers[slot].reset (p, Trigger::request_trigger_delete);
 			queue_property_update (); /* Spite: the new trigger's UI state, see run_cycle () */
+			/* Spite: and its data. A MIDI clip's RT buffer comes as an edit
+			 * posted while it waited here, when the scan in run_cycle ()
+			 * couldn't see it yet: without this it never played, and
+			 * launching it crashed in MIDITrigger::midi_run ().
+			 */
+			queue_edit_swap_check ();
 			TriggerSwapped (slot); /* EMIT SIGNAL */
 		}
 	}
@@ -5445,13 +5452,6 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 		}
 	}
 
-	/* Spite: only when a slot has posted an edit (queue_edit_swap_check ()) */
-	if (_edit_swaps_queued.exchange (false)) {
-		for (uint64_t n = 0; n < all_triggers.size(); ++n) {
-			all_triggers[n]->check_edit_swap (timepos_t (start_sample), _currently_playing == all_triggers[n], bufs);
-		}
-	}
-
 	/* handle any incoming requests from the GUI or other
 	 * non-MIDI UIs
 	 */
@@ -5491,6 +5491,17 @@ TriggerBox::run_cycle (BufferSet& bufs, samplepos_t start_sample, samplepos_t en
 			} else if (all_triggers[n]->has_pending ()) {
 				_slot_swaps_queued.store (true);
 			}
+		}
+	}
+
+	/* Spite: only when a slot has posted an edit (queue_edit_swap_check ()).
+	 * After the slot swaps: a trigger the worker made posts its data (a MIDI
+	 * clip's RT buffer) while it waits to be swapped in, and must have it
+	 * before it can run, maybe in this very cycle (see maybe_swap_pending ()).
+	 */
+	if (_edit_swaps_queued.exchange (false)) {
+		for (uint64_t n = 0; n < all_triggers.size(); ++n) {
+			all_triggers[n]->check_edit_swap (timepos_t (start_sample), _currently_playing == all_triggers[n], bufs);
 		}
 	}
 
