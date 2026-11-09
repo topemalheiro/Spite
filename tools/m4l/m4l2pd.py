@@ -907,7 +907,11 @@ def toggle_button(b, xy, rect, face, conv):
             btn.attrs.append(('textcolor', text_off))
         if text_on:
             btn.attrs.append(('textoncolor', text_on))
-        btn.attrs.append(('fontsize', str(int(round(text_height(b.get('fontsize', 9.5)))))))
+        # Max's size, smaller where Inter (wider than Live's font) wouldn't fit the button
+        fs = int(round(text_height(b.get('fontsize', 9.5))))
+        while fs > 7 and max(inter_width(t, fs) for t in (text, texton or text)) > w - 6:
+            fs -= 1
+        btn.attrs.append(('fontsize', str(fs)))
         just = b.get('textjustification')
         if just in (0, 2):
             btn.attrs.append(('align', 'left' if just == 0 else 'right'))
