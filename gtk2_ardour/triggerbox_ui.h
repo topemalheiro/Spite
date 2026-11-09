@@ -79,6 +79,11 @@ public:
 	bool drawn_selected () const { return _drawn_selected; }
 
 	void draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float size, float scale) const;
+
+	/* Spite: what the play button shows: the box's current trigger when it is
+	 * in this row's scene, even if it no longer is the slot's (a clip replaced
+	 * or cleared while it plays is detached, plan R4), else view () */
+	std::shared_ptr<ARDOUR::Trigger const> play_view () const;
 	void draw_follow_icon (Cairo::RefPtr<Cairo::Context> context, ARDOUR::FollowAction const & icon, float size, float scale) const;
 
 	void render (ArdourCanvas::Rect const& area, Cairo::RefPtr<Cairo::Context> context) const;
@@ -188,6 +193,7 @@ private:
 	 */
 	PBD::ScopedConnectionList _box_connections;
 	sigc::connection          _cue_check_connection;
+	sigc::connection          _reap_connection; /* Spite: TriggerBox::reap () now and then */
 	int32_t                   _cue_row;    /* the row of the box's current trigger, as drawn */
 	bool                      _cue_active; /* whether that trigger was drawn playing */
 

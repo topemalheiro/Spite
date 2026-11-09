@@ -153,6 +153,19 @@ TriggerEntry::repoint (TriggerReference tr)
 	rec_enable_change ();
 }
 
+std::shared_ptr<Trigger const>
+TriggerEntry::play_view () const
+{
+	std::shared_ptr<TriggerBox> box (tref.box ());
+	if (box) {
+		TriggerPtr const cp (box->currently_playing ());
+		if (cp && cp->index () == tref.slot ()) {
+			return cp;
+		}
+	}
+	return view ();
+}
+
 void
 TriggerEntry::rec_enable_change ()
 {
@@ -323,8 +336,9 @@ TriggerEntry::draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float sz,
 	float margin = 4 * scale;
 	float size   = sz - 2 * margin;
 
-	/* Spite: an empty slot shows the box's defaults (view ()) */
-	std::shared_ptr<Trigger const> const v (view ());
+	/* Spite: an empty slot shows the box's defaults (view ()), a row whose
+	 * clip plays detached shows that clip (play_view ()) */
+	std::shared_ptr<Trigger const> const v (play_view ());
 	if (!v) {
 		return;
 	}
@@ -650,8 +664,8 @@ TriggerEntry::set_widget_colors (TriggerEntry::EnteredState es)
 	}
 
 	/*draw a box around 'queued' trigger*/
-	TriggerPtr const t (trigger_if_any ());
-	if (t && !t->active () && tref.box ()->currently_playing () == t) {
+	TriggerPtr const cp (tref.box ()->currently_playing ());
+	if (cp && cp->index () == tref.slot () && !cp->active ()) {
 		play_button->set_outline_color (UIConfiguration::instance ().color ("neutral:foreground"));
 	}
 }
@@ -1049,6 +1063,11 @@ TriggerBoxUI::TriggerBoxUI (ArdourCanvas::Item* parent, TriggerStrip& s, Trigger
 	 * TriggerMaster does (this costs nothing while nothing changes)
 	 */
 	_cue_check_connection = Timers::rapid_connect (sigc::mem_fun (*this, &TriggerBoxUI::update_cue_rows));
+
+	/* Spite: slots given a Trigger by an edit that was undone are dropped
+	 * again by the box (sparse storage); cheap when there is nothing to drop.
+	 * It emits TriggerSwapped for each, which the rows follow. */
+	_reap_connection = Glib::signal_timeout ().connect_seconds ([this] () { _triggerbox.reap (); return true; }, 3);
 }
 
 TriggerBoxUI::~TriggerBoxUI ()
@@ -1059,6 +1078,7 @@ TriggerBoxUI::~TriggerBoxUI ()
 	_selection_connection.disconnect ();
 	_cue_check_connection.disconnect ();
 	_scroll_connection.disconnect ();
+	_reap_connection.disconnect ();
 }
 
 void
