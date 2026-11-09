@@ -61,6 +61,10 @@ public:
 	 */
 	void set_default_colors ();
 
+	/* Spite: the scene this row shows (rows are pooled, see CueBoxUI) */
+	uint64_t index () const { return _cue_idx; }
+	void     set_index (uint64_t);
+
 private:
 	void shape_play_button ();
 
@@ -78,12 +82,14 @@ public:
 
 	void _size_allocate (ArdourCanvas::Rect const&);
 
-	/* Spite: one row per scene, rebuilt when the scene count changes */
+	/* Spite: rows only for the scenes on screen, like the clip grids
+	 * (TriggerBoxUI): scene s is in _slots[s % _slots.size ()]
+	 */
 	void set_session (ARDOUR::Session*);
 	void build ();
-	uint32_t n_rows () const { return _slots.size (); }
 
 private:
+	bool row_event (GdkEvent*, CueEntry*);
 	bool event (GdkEvent*, uint64_t);
 	bool text_event (GdkEvent*, uint64_t);
 
@@ -101,7 +107,17 @@ private:
 
 	typedef std::vector<CueEntry*> Slots;
 
-	Slots _slots;
+	Slots                _slots;   /* rows past _pool_n are hidden, never deleted while laying out */
+	size_t               _pool_n;
+	std::vector<int64_t> _slot_of; /* the scene each row shows, -1 for none */
+	double               _width;
+	double               _height;
+	double               _rows_w;
+	double               _rows_h;
+	sigc::connection     _scroll_connection;
+
+	void     layout ();
+	uint32_t n_scenes () const;
 
 	/* Spite: for all rows, see CueEntry::set_default_colors () */
 	PBD::ScopedConnectionList _cue_connections;
@@ -118,6 +134,10 @@ public:
 
 	void on_map ();
 	void on_unmap ();
+
+	/* Spite: the column fills the master strip's height, see SceneScroll */
+	void on_size_allocate (Gtk::Allocation&);
+	bool on_scroll_event (GdkEventScroll*);
 
 private:
 	CueBoxUI* ui;

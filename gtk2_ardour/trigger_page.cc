@@ -51,6 +51,10 @@
 #include "public_editor.h"
 #include "pianoroll.h"
 #include "timers.h"
+#include <ytkmm/scrollbar.h>
+
+#include "scene_actions.h"
+#include "scene_scroll.h"
 #include "trigger_page.h"
 #include "trigger_strip.h"
 #include "triggerbox_ui.h"
@@ -69,9 +73,9 @@ using namespace std;
 
 TriggerPage::TriggerPage ()
 	: Tabbable (_("Cues"), X_("trigger"), NULL, true, Tabbable::PaneLayout (Tabbable::PaneRight | Tabbable::PaneBottom))
-	, _cue_area_frame (0.5, 0, 1.0, 0)
+	, _cue_area_frame (0.5, 0, 1.0, 1.0) /* Spite: the column fills the height */
 	, _plugin_browser (true)
-	, _cue_box (16, 16 * TriggerBox::default_triggers_per_box)
+	, _cue_box (16, 2 * TriggerBoxWidget::slot_height ()) /* Spite: at least; it fills the column */
 	, _master_widget (16, 16)
 	, _master (_master_widget.root ())
 	, _show_bottom_pane (false)
@@ -111,8 +115,13 @@ TriggerPage::TriggerPage ()
 	_cue_area_box.pack_start (*spacer[0], Gtk::PACK_SHRINK);
 	_cue_area_box.pack_start (*spacer[1], Gtk::PACK_SHRINK);
 	_cue_area_box.pack_start (*spacer[2], Gtk::PACK_SHRINK);
-	_cue_area_box.pack_start (_cue_box, Gtk::PACK_SHRINK);
+	Gtk::VScrollbar* scenes = manage (new Gtk::VScrollbar (SceneScroll::instance ().adjustment ()));
+	_cue_hbox.pack_start (_cue_box, true, true);
+	_cue_hbox.pack_start (*scenes, false, false);
+	_cue_area_box.pack_start (_cue_hbox, true, true);
 	_cue_area_box.pack_start (_master_widget, Gtk::PACK_SHRINK);
+	_cue_area_box.pack_start (_cue_mixer_space, Gtk::PACK_SHRINK);
+	TriggerStrip::mixer_size_group ()->add_widget (_cue_mixer_space);
 
 	/* left-side frame, same layout as TriggerStrip.
 	 * use Alignment instead of Frame with SHADOW_IN (2px)
@@ -122,7 +131,11 @@ TriggerPage::TriggerPage ()
 	_cue_area_frame.add (_cue_area_box);
 
 	_strip_scroller.add (_strip_packer);
-	_strip_scroller.set_policy (Gtk::POLICY_ALWAYS, Gtk::POLICY_AUTOMATIC);
+	/* Spite: the strips only scroll sideways; the scenes scroll in their
+	 * grids, all together (SceneScroll), above a mixer that stays put, as in
+	 * Live's Session View */
+	_strip_scroller.set_policy (Gtk::POLICY_ALWAYS, Gtk::POLICY_NEVER);
+	SceneScroll::instance ().set_hadjustment (_strip_scroller.get_hadjustment ());
 
 	/* Last item of strip packer, "+" background */
 	_strip_packer.pack_end (_no_strips, true, true);
@@ -150,17 +163,10 @@ TriggerPage::TriggerPage ()
 	 * plain column instead (see set_session).
 	 */
 	_strip_group_box.pack_start (_strip_scroller, true, true);
-	_master_column.pack_start (_cue_area_frame, false, false);
-	_master_column.pack_start (_master_align, false, false);
-	_master_viewport = manage (new Gtk::Viewport (*manage (new Gtk::Adjustment (0, 0, 1)), *manage (new Gtk::Adjustment (0, 0, 1))));
-	_master_viewport->set_shadow_type (Gtk::SHADOW_NONE);
-	_master_viewport->add (_master_column);
-	_master_viewport->set_size_request (-1, 1); /* the strips decide the height */
-	_strip_group_box.pack_start (*_master_viewport, false, false);
+	_master_column.pack_start (_cue_area_frame, true, true);
+	_master_column.pack_start (_master_align, true, true);
+	_strip_group_box.pack_start (_master_column, false, false);
 	_master_column.show ();
-	_master_viewport->show ();
-	_strip_scroller.get_vadjustment ()->signal_value_changed ().connect (sigc::mem_fun (*this, &TriggerPage::sync_master_scroll));
-	_strip_scroller.get_vadjustment ()->signal_changed ().connect (sigc::mem_fun (*this, &TriggerPage::sync_master_scroll));
 	_strip_scroller.signal_size_allocate ().connect (sigc::hide (sigc::mem_fun (*this, &TriggerPage::queue_align_master_column)));
 
 	/* sidebar */
@@ -584,8 +590,10 @@ TriggerPage::clear_selected_slot ()
 	if (ts.empty ()) {
 		return;
 	}
-	TriggerPtr trigger = ts.front ()->trigger ();
-	trigger->set_region (std::shared_ptr<Region>());
+	TriggerPtr trigger = ts.front ().trigger ();
+	if (trigger) {
+		trigger->set_region (std::shared_ptr<Region>());
+	}
 }
 
 void
@@ -645,19 +653,10 @@ TriggerPage::trigger_arm_changed (Trigger const * trigger)
 	if (!trigger) {
 		return;
 	}
-	for (auto & strip : _strips) {
-		TriggerBoxWidget& tbw (strip->triggerbox_widget());
-		TriggerBoxUI* ui (tbw.ui());
-
-		if (!ui) {
-			continue;
-		}
-
-		TriggerEntry* entry = ui->entry_by_trigger (*trigger);
-		if (entry) {
-			PublicEditor::instance ().get_selection ().set (entry);
-			break;
-		}
+	/* Spite: select its slot, whether or not a row shows it now */
+	std::shared_ptr<TriggerBox> box (trigger->boxptr ());
+	if (box) {
+		PublicEditor::instance ().get_selection ().set (TriggerReference (box, trigger->index ()));
 	}
 }
 
@@ -684,7 +683,7 @@ TriggerPage::selection_changed ()
 
 	if (!selection.triggers.empty ()) {
 		/* Spite: the Device view follows the track of the clip picked last */
-		std::shared_ptr<TriggerBox> box = selection.triggers.front ()->trigger_reference ().box ();
+		std::shared_ptr<TriggerBox> box = selection.triggers.front ().box ();
 		for (auto const& s : _strips) {
 			std::shared_ptr<Route> r = s->route ();
 			if (r && box && r->triggerbox () == box) {
@@ -880,7 +879,7 @@ TriggerPage::device_route () const
 
 	std::shared_ptr<Route> clip_route;
 	if (!selection.triggers.empty ()) {
-		std::shared_ptr<TriggerBox> box = selection.triggers.front ()->trigger_reference ().box ();
+		std::shared_ptr<TriggerBox> box = selection.triggers.front ().box ();
 		for (auto const& s : _strips) {
 			std::shared_ptr<Route> r = s->route ();
 			if (r && box && r->triggerbox () == box) {
@@ -986,8 +985,12 @@ TriggerPage::show_clip_view ()
 
 	hpacker.set_child_packing (_properties_box, false, false);
 
-	TriggerReference ref     = selection.triggers.front()->trigger_reference ();
+	TriggerReference ref     = selection.triggers.front ();
 	std::shared_ptr<TriggerBox> box = ref.box();
+
+	if (!box) {
+		return; /* its track went away */
+	}
 
 	if (box->data_type () == DataType::AUDIO) {
 
@@ -1433,6 +1436,13 @@ TriggerPage::register_actions ()
 	ActionManager::register_radio_action (trigger_actions, bottom_mode_group, X_("show-device-view"), _("Cue Page: Show Device View"), sigc::bind (sigc::mem_fun (*this, &TriggerPage::bottom_mode_action), DeviceMode));
 	ActionManager::register_action (trigger_actions, X_("toggle-clip-device-view"), _("Cue Page: Switch Clip/Device View"), sigc::mem_fun (*this, &TriggerPage::toggle_clip_device_view));
 
+	/* Spite: the scenes scroll together (SceneScroll) */
+	ActionManager::register_action (trigger_actions, X_("scenes-page-down"), _("Cue Page: Scroll Scenes Down a Page"), sigc::bind (sigc::mem_fun (SceneScroll::instance (), &SceneScroll::scroll_pages), 1));
+	ActionManager::register_action (trigger_actions, X_("scenes-page-up"), _("Cue Page: Scroll Scenes Up a Page"), sigc::bind (sigc::mem_fun (SceneScroll::instance (), &SceneScroll::scroll_pages), -1));
+	ActionManager::register_action (trigger_actions, X_("scenes-first"), _("Cue Page: Scroll to the First Scene"), sigc::bind (sigc::mem_fun (SceneScroll::instance (), &SceneScroll::scroll_to_end), false));
+	ActionManager::register_action (trigger_actions, X_("scenes-last"), _("Cue Page: Scroll to the Last Scene"), sigc::bind (sigc::mem_fun (SceneScroll::instance (), &SceneScroll::scroll_to_end), true));
+	ActionManager::register_action (trigger_actions, X_("go-to-scene"), _("Cue Page: Go to Scene..."), sigc::ptr_fun (&SceneActions::go_to_scene));
+
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot-alt", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 
@@ -1517,20 +1527,6 @@ TriggerPage::queue_align_master_column ()
 }
 
 void
-TriggerPage::sync_master_scroll ()
-{
-	/* Spite: the master column scrolls with the strips, so the scene column
-	 * stays level with the clip rows
-	 */
-	Gtk::Adjustment* sa = _strip_scroller.get_vadjustment ();
-	Gtk::Adjustment* ma = _master_viewport->get_vadjustment ();
-	double const v = std::min (sa->get_value (), std::max (0., ma->get_upper () - ma->get_page_size ()));
-	if (ma->get_value () != v) {
-		ma->set_value (v);
-	}
-}
-
-void
 TriggerPage::align_master_column ()
 {
 	_align_queued = false;
@@ -1556,5 +1552,11 @@ TriggerPage::align_master_column ()
 	_master_align.get_padding (t, b, l, r);
 	if ((int)t != top || (int)b != bottom) {
 		_master_align.set_padding (top, bottom, 0, 0);
+	}
+	/* the plain scene column (no master bus) has no strip frame: its own
+	 * padding stands in for it (3 px at the top, 1 below) */
+	_cue_area_frame.get_padding (t, b, l, r);
+	if ((int)t != top + 3 || (int)b != bottom + 1) {
+		_cue_area_frame.set_padding (top + 3, bottom + 1, 1, 1);
 	}
 }

@@ -22,6 +22,7 @@
 #include <ytkmm/box.h>
 #include <ytkmm/eventbox.h>
 #include <ytkmm/frame.h>
+#include <ytkmm/sizegroup.h>
 
 #include "pbd/stateful.h"
 
@@ -49,6 +50,9 @@ class TriggerMaster;
 class TriggerStrip : public AxisView, public RouteUI, public Gtk::EventBox
 {
 public:
+	/* Spite: the strips' mixer sections, as tall as the tallest, so the grids' rows line up */
+	static Glib::RefPtr<Gtk::SizeGroup> mixer_size_group ();
+
 	TriggerStrip (ARDOUR::Session*, std::shared_ptr<ARDOUR::Route>);
 	~TriggerStrip ();
 
@@ -161,6 +165,10 @@ private:
 
 	bool                _is_master;
 	Gtk::EventBox       _device_space; /* empty space in place of the device list */
+	/* Spite: the grid fills the strip above its mixer, which is as tall
+	 * in every strip (a size group), so the grids' rows line up */
+	Gtk::VBox           _mixer_section;
+	Gtk::HBox           _cue_hbox;     /* master strip: the scene column and the scenes' scrollbar */
 	CueBoxWidget*       _cue_box;      /* master strip: scene launch column */
 	FittedCanvasWidget* _cue_master_widget;
 	CueMaster*          _cue_master;

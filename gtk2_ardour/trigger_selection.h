@@ -21,10 +21,60 @@
 
 #include <list>
 
-class TriggerEntry;
+#include "ardour/triggerbox.h"
 
-class TriggerSelection : public std::list<TriggerEntry*>
+/* Spite: the selected clip slots, by box and scene (TriggerReference), not by
+ * the rows that show them: the Cue page only has rows for the scenes on
+ * screen, so a selected slot may have none. Inserting or removing scenes
+ * moves them along, see scenes_shifted ().
+ */
+class TriggerSelection : public std::list<ARDOUR::TriggerReference>
 {
-   public:
-};
+public:
+	static bool same (ARDOUR::TriggerReference const& a, ARDOUR::TriggerReference const& b)
+	{
+		return a.slot () == b.slot () && a.box () == b.box ();
+	}
 
+	iterator find (ARDOUR::TriggerReference const& r)
+	{
+		for (iterator i = begin (); i != end (); ++i) {
+			if (same (*i, r)) {
+				return i;
+			}
+		}
+		return end ();
+	}
+
+	bool contains (ARDOUR::TriggerReference const& r) const
+	{
+		for (auto const& t : *this) {
+			if (same (t, r)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/* scenes were inserted before `at` (delta > 0), or `-delta` scenes were
+	 * removed from `at` on (delta < 0): true if the selection changed */
+	bool scenes_shifted (uint32_t at, int32_t delta)
+	{
+		bool changed = false;
+		for (iterator i = begin (); i != end ();) {
+			uint32_t const s = i->slot ();
+			if (s < at) {
+				++i;
+				continue;
+			}
+			changed = true;
+			if (delta < 0 && s < at + (uint32_t) -delta) {
+				i = erase (i); /* its scene went */
+				continue;
+			}
+			i->set (i->box (), s + delta);
+			++i;
+		}
+		return changed;
+	}
+};

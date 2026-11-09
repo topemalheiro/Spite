@@ -1646,14 +1646,15 @@ Selection::midi_regions ()
 	return ms;
 }
 
+/* Spite: trigger slots are selected by box and scene, see TriggerSelection */
 bool
-Selection::selected (TriggerEntry* te) const
+Selection::selected (TriggerReference const& tr) const
 {
-	return find (triggers.begin(), triggers.end(), te) != triggers.end();
+	return triggers.contains (tr);
 }
 
 void
-Selection::set (TriggerEntry* te)
+Selection::set (TriggerReference const& tr)
 {
 #if 0
 	clear();
@@ -1668,21 +1669,23 @@ Selection::set (TriggerEntry* te)
 	clear_markers ();
 	pending_midi_note_selection.clear();
 #endif
-	clear_triggers (te ? false: true); /* Do not emit signal here, add() emits signal */
-	add (te);
+	clear_triggers (false); /* add () emits the signal */
+	add (tr);
 }
 
 void
-Selection::add (TriggerEntry* te)
+Selection::add (TriggerReference const& tr)
 {
-	triggers.push_back (te);
+	if (!triggers.contains (tr)) {
+		triggers.push_back (tr);
+	}
 	TriggersChanged ();
 }
 
 void
-Selection::remove (TriggerEntry* te)
+Selection::remove (TriggerReference const& tr)
 {
-	TriggerSelection::iterator e = find (triggers.begin(), triggers.end(), te);
+	TriggerSelection::iterator e = triggers.find (tr);
 
 	if (e != triggers.end()) {
 		triggers.erase (e);
@@ -1691,12 +1694,12 @@ Selection::remove (TriggerEntry* te)
 }
 
 void
-Selection::toggle (TriggerEntry* te)
+Selection::toggle (TriggerReference const& tr)
 {
-	TriggerSelection::iterator e;
+	TriggerSelection::iterator e = triggers.find (tr);
 
-	if ((e = find (triggers.begin(), triggers.end(), te)) != triggers.end()) {
-		add (te);
+	if (e == triggers.end()) {
+		triggers.push_back (tr);
 	} else {
 		triggers.erase (e);
 	}

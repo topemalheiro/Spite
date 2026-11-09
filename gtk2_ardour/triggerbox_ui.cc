@@ -54,6 +54,7 @@
 #include "slot_properties_box.h"
 #include "timers.h"
 #include "trigger_ui.h"
+#include "scene_scroll.h"
 #include "triggerbox_ui.h"
 #include "ui_config.h"
 #include "utils.h"
@@ -621,7 +622,7 @@ TriggerEntry::set_widget_colors (TriggerEntry::EnteredState es)
 	}
 
 	/*preserve selection border*/
-	_drawn_selected = PublicEditor::instance ().get_selection ().selected (this);
+	_drawn_selected = PublicEditor::instance ().get_selection ().selected (trigger_reference ());
 	if (_drawn_selected) {
 		name_button->set_outline_color (UIConfiguration::instance ().color ("alert:red"));
 	}
@@ -648,7 +649,7 @@ TriggerEntry::name_button_event (GdkEvent* ev)
 		break;
 	case GDK_BUTTON_PRESS:
 		if (Gtkmm2ext::Keyboard::is_context_menu_event (&ev->button)) {
-			PublicEditor::instance ().get_selection ().set (this);
+			PublicEditor::instance ().get_selection ().set (trigger_reference ());
 			context_menu ();
 			return true;
 		}
@@ -665,7 +666,7 @@ TriggerEntry::name_button_event (GdkEvent* ev)
 		}
 		switch (ev->button.button) {
 		case 1:
-			PublicEditor::instance ().get_selection ().set (this);
+			PublicEditor::instance ().get_selection ().set (trigger_reference ());
 			return true;
 		default:
 			break;
@@ -947,7 +948,12 @@ Glib::RefPtr<Gtk::TargetList> TriggerBoxUI::_dnd_src;
 TriggerBoxUI::TriggerBoxUI (ArdourCanvas::Item* parent, TriggerStrip& s, TriggerBox& tb)
 	: Rectangle (parent)
 	, _triggerbox (tb)
+	, _pool_n (0)
 	, _strip (s)
+	, _width (0)
+	, _height (0)
+	, _rows_w (-1)
+	, _rows_h (-1)
 	, _cue_row (-1)
 	, _cue_active (false)
 {
@@ -957,6 +963,9 @@ TriggerBoxUI::TriggerBoxUI (ArdourCanvas::Item* parent, TriggerStrip& s, Trigger
 	set_fill (true);
 
 	build ();
+
+	/* Spite: the page's scenes scroll as one */
+	_scroll_connection = SceneScroll::instance ().adjustment ().signal_value_changed ().connect (sigc::mem_fun (*this, &TriggerBoxUI::layout));
 
 	_selection_connection = PublicEditor::instance ().get_selection ().TriggersChanged.connect (sigc::mem_fun (*this, &TriggerBoxUI::selection_changed));
 
@@ -1015,18 +1024,18 @@ TriggerBoxUI::~TriggerBoxUI ()
 	*/
 	_selection_connection.disconnect ();
 	_cue_check_connection.disconnect ();
+	_scroll_connection.disconnect ();
 }
 
 void
 TriggerBoxUI::selection_changed ()
 {
-	/* Spite: only the rows whose selection changed are redrawn; with many
-	 * scenes each track has hundreds of rows. The selection holds rows of
-	 * every track: they are compared, never dereferenced here.
+	/* Spite: only the rows whose selection changed are redrawn; the
+	 * selection holds slots (box and scene) of every track.
 	 */
 	Selection const& sel (PublicEditor::instance ().get_selection ());
 	for (auto& slot : _slots) {
-		if (sel.selected (slot) != slot->drawn_selected ()) {
+		if (sel.selected (slot->trigger_reference ()) != slot->drawn_selected ()) {
 			slot->selection_change ();
 		}
 	}
@@ -1041,7 +1050,7 @@ TriggerBoxUI::cue_row () const
 		return -1;
 	}
 	uint32_t const n = cp->index ();
-	return n < _slots.size () ? (int32_t) n : -1;
+	return n < _triggerbox.n_triggers () ? (int32_t) n : -1;
 }
 
 void
@@ -1065,11 +1074,16 @@ TriggerBoxUI::update_cue_rows ()
 	pc.add (Properties::running);
 	pc.add (Properties::currently_playing);
 
-	if (_cue_row >= 0 && _cue_row < (int32_t) _slots.size ()) {
-		_slots[_cue_row]->on_trigger_changed (pc);
+	/* rows off screen have none: they show the state when scrolled in */
+	if (_cue_row >= 0) {
+		if (TriggerEntry* e = entry_for_slot (_cue_row)) {
+			e->on_trigger_changed (pc);
+		}
 	}
 	if (now >= 0 && now != _cue_row) {
-		_slots[now]->on_trigger_changed (pc);
+		if (TriggerEntry* e = entry_for_slot (now)) {
+			e->on_trigger_changed (pc);
+		}
 	}
 	_cue_row    = now;
 	_cue_active = active;
@@ -1100,14 +1114,13 @@ void
 TriggerBoxUI::trigger_swapped (uint32_t n)
 {
 	/* a newly loaded clip took the place of slot n's trigger */
-	if (n >= _slots.size ()) {
-		return;
+	TriggerEntry* e = entry_for_slot (n);
+	if (!e) {
+		return; /* off screen: its row is pointed at it when scrolled in */
 	}
-	_slots[n]->trigger_swapped ();
+	e->trigger_swapped ();
 	TriggerPtr const t (_triggerbox.trigger (n));
-	if (n < _shown.size ()) {
-		_shown[n] = t ? t.get () : 0;
-	}
+	_shown[n % _pool_n] = t ? t.get () : 0;
 }
 
 void
@@ -1179,72 +1192,86 @@ TriggerBoxUI::drag_data_get (Glib::RefPtr<Gdk::DragContext> const& context, Gtk:
 void
 TriggerBoxUI::build ()
 {
-	/* Spite: (re)built when scenes are inserted or removed. Rows are kept
-	 * and only those whose slot now holds another trigger are pointed at it
-	 * again, so that inserting a scene stays quick with hundreds of scenes on
-	 * many tracks. The editor's selection holds the rows themselves: keep it
-	 * on the same clips, which may have moved to other rows. A row's trigger ()
-	 * is looked up by slot, so what it showed is in _shown.
+	/* Spite: scenes were inserted or removed: the rows on screen show what
+	 * their slots hold now (the selection is by slot and moves with the
+	 * scenes: TriggerSelection::scenes_shifted ())
 	 */
-	Selection&                          sel (PublicEditor::instance ().get_selection ());
-	std::vector<ARDOUR::Trigger const*> was_selected;
-
-	for (size_t i = 0; i < _slots.size (); ++i) {
-		if (sel.selected (_slots[i]) && i < _shown.size ()) {
-			was_selected.push_back (_shown[i]);
-		}
-	}
-	/* all of them first, as each removal runs selection_changed () over _slots */
-	for (auto& slot : _slots) {
-		if (sel.selected (slot)) {
-			sel.remove (slot);
-		}
-	}
-
-	std::shared_ptr<TriggerBox> box (_triggerbox.shared_from_this ());
-	uint32_t const              n = _triggerbox.n_triggers ();
-
-	while (_slots.size () > n) {
-		delete _slots.back ();
-		_slots.pop_back ();
-	}
-	_shown.resize (_slots.size (), 0);
-
-	for (uint32_t i = 0; i < _slots.size (); ++i) {
-		TriggerPtr t (_triggerbox.trigger (i));
-		if (t && t.get () != _shown[i]) {
-			_slots[i]->repoint (TriggerReference (box, i));
-			_shown[i] = t.get ();
-		}
-	}
-
-	while (_slots.size () < n) {
-		uint32_t const i = _slots.size ();
-		_slots.push_back (new TriggerEntry (this, _strip, TriggerReference (box, i)));
-		TriggerPtr t (_triggerbox.trigger (i));
-		_shown.push_back (t ? t.get () : 0);
-	}
-
-	if (!was_selected.empty ()) {
-		for (size_t i = 0; i < _slots.size (); ++i) {
-			if (std::find (was_selected.begin (), was_selected.end (), _shown[i]) != was_selected.end ()) {
-				sel.add (_slots[i]);
-			}
-		}
-	}
+	layout ();
 
 	/* the rows were redone for their triggers, the current one included */
 	TriggerPtr const cp (_triggerbox.currently_playing ());
 	_cue_row    = cue_row ();
 	_cue_active = cp && cp->active ();
+}
 
-	if (n > 0) {
-		/* lay the rows out */
-		ArdourCanvas::Rect const r (get ());
-		if (r.height () > 0) {
-			_size_allocate (r);
+/* Spite: the rows for the scenes on screen (see Slots), pointed at their
+ * slots and placed. Called when the view's size, the scroll offset or the
+ * scene count changes.
+ */
+void
+TriggerBoxUI::layout ()
+{
+	SceneScroll&   ss (SceneScroll::instance ());
+	double const   rh = ss.row_height ();
+	uint32_t const n  = _triggerbox.n_triggers ();
+	size_t const   P  = std::min<size_t> (n, SceneScroll::pool_size (_height));
+
+	std::shared_ptr<TriggerBox> box (_triggerbox.shared_from_this ());
+
+	if (P != _pool_n) {
+		/* the view got taller or shorter: rows are assigned to scenes again */
+		while (_slots.size () < P) {
+			_slots.push_back (new TriggerEntry (this, _strip, TriggerReference (box, std::min<uint32_t> (_slots.size (), n - 1))));
 		}
+		for (size_t k = P; k < _slots.size (); ++k) {
+			_slots[k]->hide ();
+		}
+		_pool_n = P;
+		_slot_of.assign (_slots.size (), -1);
+		_shown.assign (_slots.size (), 0);
+		_rows_w = -1;
 	}
+	if (P == 0) {
+		return;
+	}
+
+	bool const resize = (_rows_w != _width || _rows_h != rh);
+	_rows_w = _width;
+	_rows_h = rh;
+
+	uint32_t const first  = ss.first_row ();
+	double const   offset = ss.offset ();
+
+	for (uint32_t s = first; s < first + P; ++s) {
+		size_t const  k = s % P;
+		TriggerEntry* e = _slots[k];
+		if (s >= n) {
+			e->hide ();
+			_slot_of[k] = -1;
+			continue;
+		}
+		TriggerPtr const t (_triggerbox.trigger (s));
+		if (_slot_of[k] != (int64_t) s || _shown[k] != t.get ()) {
+			e->repoint (TriggerReference (box, s));
+			_slot_of[k] = s;
+			_shown[k]   = t.get ();
+		}
+		if (resize) {
+			e->size_allocate (ArdourCanvas::Rect (0, 0, _width, rh));
+		}
+		e->set_position (Duple (0, s * rh - offset));
+		e->show ();
+	}
+}
+
+TriggerEntry*
+TriggerBoxUI::entry_for_slot (uint32_t s) const
+{
+	if (_pool_n == 0) {
+		return 0;
+	}
+	size_t const k = s % _pool_n;
+	return _slot_of[k] == (int64_t) s ? _slots[k] : 0;
 }
 
 void
@@ -1252,31 +1279,17 @@ TriggerBoxUI::_size_allocate (ArdourCanvas::Rect const& alloc)
 {
 	Rectangle::_size_allocate (alloc);
 
-	const float width  = alloc.width ();
-	const float height = alloc.height ();
-
-	const float slot_h = height / std::max<size_t> (1, _slots.size ()); /* Spite: one row per scene */
-
-	float ypos = 0;
-	for (auto& slot : _slots) {
-		slot->size_allocate (ArdourCanvas::Rect (0, 0, width, slot_h));
-		slot->set_position (Duple (0, ypos));
-		ypos += slot_h;
-		slot->show ();
-	}
+	/* Spite: the view; the rows are a scene's height each, see layout () */
+	_width  = alloc.width ();
+	_height = alloc.height ();
+	layout ();
 }
 
 uint64_t
 TriggerBoxUI::slot_at_y (int y) const
 {
-	uint64_t n = 0;
-	for (auto& slot : _slots) {
-		if (slot->height () < y) {
-			++n;
-			y -= slot->height ();
-		}
-	}
-	return n;
+	/* Spite: the scene under y, on screen or not */
+	return (uint64_t) std::max (0., floor ((y + SceneScroll::instance ().offset ()) / SceneScroll::row_height ()));
 }
 
 bool
@@ -1291,19 +1304,19 @@ TriggerBoxUI::drag_motion (Glib::RefPtr<Gdk::DragContext> const& context, int, i
 	}
 
 	uint64_t n = slot_at_y (y);
-	if (n >= _slots.size ()) {
-		assert (0);
-		can_drop = false;
+	if (n >= _triggerbox.n_triggers ()) {
+		can_drop = false; /* below the last scene */
 	}
 
 	if (can_drop) {
 		context->drag_status (Gdk::ACTION_COPY, time);
-		/* prelight */
+		/* prelight (only rows on screen exist) */
 		GdkEventCrossing ev;
 		ev.detail = GDK_NOTIFY_ANCESTOR;
-		for (size_t i = 0; i < _slots.size (); ++i) {
-			ev.type = (i == n) ? GDK_ENTER_NOTIFY : GDK_LEAVE_NOTIFY;
-			_slots[i]->name_button_event ((GdkEvent*)&ev);
+		TriggerEntry* over = entry_for_slot (n);
+		for (auto& slot : _slots) {
+			ev.type = (slot == over) ? GDK_ENTER_NOTIFY : GDK_LEAVE_NOTIFY;
+			slot->name_button_event ((GdkEvent*)&ev);
 		}
 		return true;
 	} else {
@@ -1327,7 +1340,7 @@ void
 TriggerBoxUI::drag_data_received (Glib::RefPtr<Gdk::DragContext> const& context, int /*x*/, int y, Gtk::SelectionData const& data, guint /*info*/, guint time)
 {
 	uint64_t n = slot_at_y (y);
-	if (n >= _slots.size ()) {
+	if (n >= _triggerbox.n_triggers ()) {
 		context->drag_finish (false, false, time);
 		return;
 	}
@@ -1378,24 +1391,13 @@ TriggerEntry*
 TriggerBoxUI::entry_by_trigger (Trigger const & trigger) const
 {
 	/* Spite: a trigger of another box is in none of our rows, and one of ours
-	 * is in the row of its index; each row looks its trigger up by slot.
+	 * is in the row of its index, if that is on screen.
 	 */
 	if (&trigger.box () != &_triggerbox) {
 		return nullptr;
 	}
-
-	uint32_t const n = trigger.index ();
-	if (n < _slots.size () && _slots[n]->trigger ().get () == &trigger) {
-		return _slots[n];
-	}
-
-	for (auto & slot : _slots) {
-		if (slot->trigger().get() == &trigger) {
-			return slot;
-		}
-	}
-
-	return nullptr;
+	TriggerEntry* e = entry_for_slot (trigger.index ());
+	return (e && e->trigger ().get () == &trigger) ? e : nullptr;
 }
 
 /* ********************************************** */
@@ -1424,8 +1426,7 @@ TriggerBoxWidget::set_triggerbox (TriggerBox* tb)
 
 	_ui = new TriggerBoxUI (root (), _strip, *tb);
 
-	/* Spite: one row per scene */
-	set_nominal_height (tb->n_triggers () * slot_height ());
+	/* Spite: the grid fills its strip's height, whatever the scene count */
 	tb->session ().SceneCountChanged.connect (_scene_connection, invalidator (*this), std::bind (&TriggerBoxWidget::scenes_changed, this), gui_context ());
 
 	repeat_size_allocation ();
@@ -1438,6 +1439,20 @@ TriggerBoxWidget::scenes_changed ()
 		return;
 	}
 	_ui->build ();
-	set_nominal_height (_ui->triggerbox ().n_triggers () * slot_height ());
-	repeat_size_allocation ();
+}
+
+void
+TriggerBoxWidget::on_size_allocate (Gtk::Allocation& alloc)
+{
+	FittedCanvasWidget::on_size_allocate (alloc);
+	SceneScroll::instance ().set_view_height (alloc.get_height ());
+}
+
+bool
+TriggerBoxWidget::on_scroll_event (GdkEventScroll* ev)
+{
+	if (FittedCanvasWidget::on_scroll_event (ev)) {
+		return true;
+	}
+	return SceneScroll::instance ().scroll_event (ev);
 }

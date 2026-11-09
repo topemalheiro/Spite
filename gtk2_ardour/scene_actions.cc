@@ -28,8 +28,10 @@
 #include "ardour_ui.h"
 #include "public_editor.h"
 #include "scene_actions.h"
+#include "scene_scroll.h"
 #include "selection.h"
 #include "triggerbox_ui.h"
+#include "utils.h"
 
 #include "pbd/i18n.h"
 
@@ -41,6 +43,43 @@ void
 SceneActions::set_selected_scene (int32_t n)
 {
 	_selected_scene = n;
+}
+
+void
+SceneActions::scenes_shifted (uint32_t at, int32_t delta)
+{
+	if (delta == 0) {
+		return;
+	}
+	Selection& sel (PublicEditor::instance ().get_selection ());
+	if (sel.triggers.scenes_shifted (at, delta)) {
+		sel.TriggersChanged ();
+	}
+	if (_selected_scene >= (int32_t) at) {
+		if (delta > 0) {
+			_selected_scene += delta;
+		} else if (_selected_scene >= (int32_t) at - delta) {
+			_selected_scene += delta;
+		} else {
+			_selected_scene = at; /* its scene went: the one after it */
+		}
+	}
+}
+
+void
+SceneActions::go_to_scene ()
+{
+	Session* s = ARDOUR_UI::instance ()->the_session ();
+	if (!s || s->scene_count () == 0) {
+		return;
+	}
+	uint32_t const cur = _selected_scene >= 0 ? (uint32_t) _selected_scene : SceneScroll::instance ().first_row ();
+	int const      n   = ARDOUR_UI_UTILS::ask_scene_number (_("Go to Scene"), s->scene_count (), cur);
+	if (n < 0) {
+		return;
+	}
+	_selected_scene = n;
+	SceneScroll::instance ().show_row (n);
 }
 
 void
@@ -56,8 +95,8 @@ SceneActions::insert_scene ()
 	TriggerSelection const& ts (PublicEditor::instance ().get_selection ().triggers);
 	if (!ts.empty ()) {
 		uint32_t row = 0;
-		for (auto const& te : ts) {
-			row = std::max (row, te->trigger_reference ().slot ());
+		for (auto const& tr : ts) {
+			row = std::max (row, tr.slot ());
 		}
 		at = row + 1;
 	} else if (_selected_scene >= 0 && _selected_scene < (int32_t) s->scene_count ()) {
@@ -87,6 +126,7 @@ SceneActions::insert_scene_at (uint32_t at)
 	if (s->insert_scene (at)) {
 		s->add_command (new SceneCommand (*s, SceneCommand::Insert, at));
 		s->commit_reversible_command ();
+		scenes_shifted (at, 1); /* TODO: from Session::ScenesShifted (step 2), for undo and Lua too */
 		/* like Live, the new scene is the selected one: Ctrl+I again adds below it */
 		_selected_scene = at;
 	} else {
@@ -113,6 +153,7 @@ SceneActions::delete_scene (uint32_t at)
 	if (s->remove_scene (at)) {
 		s->add_command (new SceneCommand (*s, SceneCommand::Remove, at));
 		s->commit_reversible_command ();
+		scenes_shifted (at, -1); /* TODO: from Session::ScenesShifted (step 2) */
 		if (_selected_scene >= (int32_t) s->scene_count ()) {
 			_selected_scene = (int32_t) s->scene_count () - 1;
 		}

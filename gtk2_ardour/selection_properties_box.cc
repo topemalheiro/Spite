@@ -204,9 +204,7 @@ SelectionPropertiesBox::selection_changed ()
 
 	bool show_slot_properties = false;
 	if (!selection.triggers.empty () && 0 != (_disposition & ShowTriggers)) {
-		TriggerSelection ts      = selection.triggers;
-		TriggerEntry*    entry   = *ts.begin ();
-		TriggerReference ref     = entry->trigger_reference ();
+		TriggerReference ref = selection.triggers.front ();
 
 		_slot_prop_box->set_slot(ref);
 		show_slot_properties = true;

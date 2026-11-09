@@ -43,6 +43,7 @@
 #include "public_editor.h"
 #include "region_view.h"
 #include "scene_actions.h"
+#include "scene_scroll.h"
 #include "selection.h"
 #include "timers.h"
 #include "trigger_ui.h"
@@ -199,9 +200,31 @@ CueEntry::set_default_colors ()
 	}
 }
 
+void
+CueEntry::set_index (uint64_t n)
+{
+	if (n == _cue_idx) {
+		return;
+	}
+	_cue_idx = n;
+	name     = string_compose ("cue %1", _cue_idx);
+	jump_text->set (cue_marker_name (_cue_idx));
+	set_default_colors ();
+	/* the number's width changed: center it again */
+	ArdourCanvas::Rect const r (get ());
+	if (r.height () > 0) {
+		_size_allocate (r);
+	}
+}
+
 CueBoxUI::CueBoxUI (ArdourCanvas::Item* parent)
 	: ArdourCanvas::Rectangle (parent)
 	, _context_menu (0)
+	, _pool_n (0)
+	, _width (0)
+	, _height (0)
+	, _rows_w (-1)
+	, _rows_h (-1)
 {
 	set_layout_sensitive (true); // why???
 
@@ -213,6 +236,9 @@ CueBoxUI::CueBoxUI (ArdourCanvas::Item* parent)
 	/* Spite: once for all rows (each row used to connect to both) */
 	TriggerBox::CueRecordingChanged.connect (_cue_connections, invalidator (*this), std::bind (&CueBoxUI::rows_colors_changed, this), gui_context ());
 	UIConfiguration::instance ().ParameterChanged.connect (sigc::mem_fun (*this, &CueBoxUI::ui_parameter_changed));
+
+	/* Spite: scrolls with the clip grids */
+	_scroll_connection = SceneScroll::instance ().adjustment ().signal_value_changed ().connect (sigc::mem_fun (*this, &CueBoxUI::layout));
 }
 
 void
@@ -233,6 +259,7 @@ CueBoxUI::ui_parameter_changed (std::string const& p)
 
 CueBoxUI::~CueBoxUI ()
 {
+	_scroll_connection.disconnect ();
 }
 
 void
@@ -259,7 +286,7 @@ CueBoxUI::context_menu (GdkEventButton* ev, uint64_t idx)
 		Menu*     jump_menu = manage (new Menu);
 		MenuList& jitems      = jump_menu->items ();
 		/* Spite: one per scene, grouped when there are many */
-		ARDOUR_UI_UTILS::add_scene_menu_items (jitems, _slots.size (), [this, idx] (uint32_t i) {
+		ARDOUR_UI_UTILS::add_scene_menu_items (jitems, n_scenes (), [this, idx] (uint32_t i) {
 			FollowAction jump_fa (FollowAction::JumpTrigger);
 			jump_fa.targets.set (i);
 			set_all_follow_action (jump_fa, idx);
@@ -421,20 +448,67 @@ CueBoxUI::set_session (Session* s)
 void
 CueBoxUI::build ()
 {
-	/* Spite: one row per scene; rebuilt when scenes are inserted or removed */
-	for (auto& slot : _slots) {
-		delete slot;
+	/* Spite: scenes were inserted or removed, or the session changed */
+	layout ();
+}
+
+uint32_t
+CueBoxUI::n_scenes () const
+{
+	return _session ? _session->scene_count () : (uint32_t) TriggerBox::default_triggers_per_box;
+}
+
+/* Spite: the rows for the scenes on screen, numbered and placed, as
+ * TriggerBoxUI::layout () does for the clip grids */
+void
+CueBoxUI::layout ()
+{
+	SceneScroll&   ss (SceneScroll::instance ());
+	double const   rh = ss.row_height ();
+	uint32_t const n  = n_scenes ();
+	size_t const   P  = std::min<size_t> (n, SceneScroll::pool_size (_height));
+
+	if (P != _pool_n) {
+		while (_slots.size () < P) {
+			CueEntry* te = new CueEntry (this, _slots.size ());
+			te->Event.connect (sigc::bind (sigc::mem_fun (*this, &CueBoxUI::row_event), te));
+			_slots.push_back (te);
+		}
+		for (size_t k = P; k < _slots.size (); ++k) {
+			_slots[k]->hide ();
+		}
+		_pool_n = P;
+		_slot_of.assign (_slots.size (), -1);
+		_rows_w = -1;
 	}
-	_slots.clear ();
+	if (P == 0) {
+		return;
+	}
 
-	int32_t const n_scenes = _session ? (int32_t) _session->scene_count () : TriggerBox::default_triggers_per_box;
+	bool const resize = (_rows_w != _width || _rows_h != rh);
+	_rows_w = _width;
+	_rows_h = rh;
 
-	for (int32_t n = 0; n < n_scenes; ++n) {
-		CueEntry* te = new CueEntry (this, n);
+	uint32_t const first  = ss.first_row ();
+	double const   offset = ss.offset ();
 
-		_slots.push_back (te);
-
-		te->Event.connect (sigc::bind (sigc::mem_fun (*this, &CueBoxUI::event), n));
+	for (uint32_t s = first; s < first + P; ++s) {
+		size_t const k = s % P;
+		CueEntry*    e = _slots[k];
+		if (s >= n) {
+			e->hide ();
+			_slot_of[k] = -1;
+			continue;
+		}
+		if (_slot_of[k] != (int64_t) s) {
+			e->set_index (s);
+			_slot_of[k] = s;
+		}
+		if (resize) {
+			e->size_allocate (ArdourCanvas::Rect (0, 0, _width, rh));
+		}
+		e->set_position (Duple (0, s * rh - offset));
+		e->show ();
 	}
 }
 
@@ -443,18 +517,16 @@ CueBoxUI::_size_allocate (ArdourCanvas::Rect const& alloc)
 {
 	ArdourCanvas::Rectangle::_size_allocate (alloc);
 
-	const float width  = alloc.width ();
-	const float height = alloc.height ();
+	/* Spite: the view; rows are a scene's height each, see layout () */
+	_width  = alloc.width ();
+	_height = alloc.height ();
+	layout ();
+}
 
-	const float slot_h = height / std::max<size_t> (1, _slots.size ()); /* Spite: one row per scene */
-
-	float ypos = 0;
-	for (auto& slot : _slots) {
-		slot->size_allocate (ArdourCanvas::Rect (0, 0, width, slot_h));
-		slot->set_position (Duple (0, ypos));
-		ypos += slot_h;
-		slot->show ();
-	}
+bool
+CueBoxUI::row_event (GdkEvent* ev, CueEntry* row)
+{
+	return event (ev, row->index ());
 }
 
 bool
@@ -506,9 +578,26 @@ CueBoxWidget::set_session (Session* s)
 void
 CueBoxWidget::scenes_changed ()
 {
+	if (_session) {
+		SceneScroll::instance ().set_rows (_session->scene_count ());
+	}
 	ui->build ();
-	set_nominal_height (ui->n_rows () * 16.f); /* the clip slots' row height, TriggerBoxWidget::slot_height () */
-	repeat_size_allocation ();
+}
+
+void
+CueBoxWidget::on_size_allocate (Gtk::Allocation& alloc)
+{
+	FittedCanvasWidget::on_size_allocate (alloc);
+	SceneScroll::instance ().set_view_height (alloc.get_height ());
+}
+
+bool
+CueBoxWidget::on_scroll_event (GdkEventScroll* ev)
+{
+	if (FittedCanvasWidget::on_scroll_event (ev)) {
+		return true;
+	}
+	return SceneScroll::instance ().scroll_event (ev);
 }
 
 void

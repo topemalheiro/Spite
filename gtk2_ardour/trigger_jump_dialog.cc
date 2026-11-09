@@ -16,11 +16,15 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <cstdlib>
+
 #include <ytkmm/scrolledwindow.h>
 #include <ytkmm/stock.h>
 #include <ytkmm/table.h>
 
 #include "gtkmm2ext/utils.h"
+
+#include "pbd/compose.h"
 
 #include "widgets/ardour_button.h"
 
@@ -47,6 +51,7 @@ using namespace ArdourWidgets;
 TriggerJumpDialog::TriggerJumpDialog (bool right)
 	: ArdourDialog ("")
 	, _right_fa(right)
+	, _use_runs (false)
 {
 //	add_button (Gtk::Stock::CANCEL, Gtk::RESPONSE_CANCEL);
 //	add_button (Gtk::Stock::APPLY, Gtk::RESPONSE_ACCEPT);
@@ -62,7 +67,23 @@ TriggerJumpDialog::on_trigger_set ()
 	int r = 0;
 
 	int const n_scenes = trigger () ? (int) trigger ()->box ().n_triggers () : TriggerBox::default_triggers_per_box; /* Spite */
-	for (int i = 0; i < n_scenes; i++) {
+
+	if (n_scenes > 64) {
+		/* Spite: a list of scene numbers and runs, as many scenes as there are */
+		_use_runs = true;
+		Gtk::Label* l = manage (new Gtk::Label (string_compose (_("Scenes to jump to (1 to %1),\nfor example: 3, 10-40, 512"), n_scenes), ALIGN_START));
+		get_vbox ()->pack_start (*l, false, false, 4);
+		get_vbox ()->pack_start (_runs_entry, false, false, 4);
+		get_vbox ()->pack_start (_runs_note, false, false, 0);
+		_runs_entry.set_width_chars (32);
+		_runs_entry.signal_activate ().connect (sigc::mem_fun (*this, &TriggerJumpDialog::runs_activated));
+		_runs_entry.signal_focus_out_event ().connect (sigc::mem_fun (*this, &TriggerJumpDialog::runs_focus_out));
+		l->show ();
+		_runs_entry.show ();
+		_runs_note.show ();
+	}
+
+	for (int i = 0; !_use_runs && i < n_scenes; i++) {
 		ArdourButton* b = manage (new ArdourButton (ArdourButton::led_default_elements));
 
 		b->signal_clicked.connect(sigc::bind(sigc::mem_fun(*this, &TriggerJumpDialog::button_clicked), i));
@@ -76,7 +97,9 @@ TriggerJumpDialog::on_trigger_set ()
 		++r;
 	}
 
-	if (n_scenes > 16) {
+	if (_use_runs) {
+		/* no buttons */
+	} else if (n_scenes > 16) {
 		/* Spite: scenes can number in the hundreds; show 16 rows and scroll */
 		Gtk::ScrolledWindow* sw = manage (new Gtk::ScrolledWindow);
 		sw->set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
@@ -122,6 +145,13 @@ TriggerJumpDialog::on_trigger_changed (PropertyChange const& what)
 
 	FollowAction jump_fa = _right_fa ? trigger()->follow_action1() : trigger()->follow_action0();
 
+	if (_use_runs) {
+		if (!_runs_entry.has_focus ()) {
+			_runs_entry.set_text (targets_to_runs (jump_fa, box.n_triggers ()));
+		}
+		return;
+	}
+
 	//update button display state
 	ButtonList::const_iterator b = _buttonlist.begin ();
 	for (int i = 0; i < (int) box.n_triggers (); i++) {
@@ -136,6 +166,88 @@ TriggerJumpDialog::on_trigger_changed (PropertyChange const& what)
 		++b;
 	}
 	
+}
+
+std::string
+TriggerJumpDialog::targets_to_runs (FollowAction const& fa, uint32_t n_scenes)
+{
+	std::string    out;
+	uint32_t const m = std::min<uint32_t> (n_scenes, fa.targets.size ());
+	for (uint32_t i = 0; i < m;) {
+		if (!fa.targets.test (i)) {
+			++i;
+			continue;
+		}
+		uint32_t j = i;
+		while (j + 1 < m && fa.targets.test (j + 1)) {
+			++j;
+		}
+		if (!out.empty ()) {
+			out += ", ";
+		}
+		out += (i == j) ? std::to_string (i + 1) : string_compose ("%1-%2", i + 1, j + 1);
+		i = j + 1;
+	}
+	return out;
+}
+
+bool
+TriggerJumpDialog::runs_to_targets (std::string const& text, uint32_t n_scenes, FollowAction& fa)
+{
+	FollowAction::Targets t;
+	std::string           tok;
+	std::string           rest (text + ",");
+	for (char c : rest) {
+		if (c != ',' && c != ' ' && c != '\t' && c != ';') {
+			tok += c;
+			continue;
+		}
+		if (tok.empty ()) {
+			continue;
+		}
+		char*               end = 0;
+		unsigned long const a   = strtoul (tok.c_str (), &end, 10);
+		unsigned long       b   = a;
+		if (end && *end == '-') {
+			b = strtoul (end + 1, &end, 10);
+		}
+		if (!end || *end != '\0' || a < 1 || b < a || b > n_scenes || b > t.size ()) {
+			return false;
+		}
+		for (unsigned long i = a; i <= b; ++i) {
+			t.set (i - 1);
+		}
+		tok.clear ();
+	}
+	fa.targets = t;
+	return true;
+}
+
+void
+TriggerJumpDialog::runs_activated ()
+{
+	if (!trigger ()) {
+		return;
+	}
+	FollowAction jump_fa = _right_fa ? trigger ()->follow_action1 () : trigger ()->follow_action0 ();
+	if (!runs_to_targets (_runs_entry.get_text (), trigger ()->box ().n_triggers (), jump_fa)) {
+		_runs_note.set_text (_("Scene numbers, and runs like 10-40, separated by commas"));
+		return;
+	}
+	_runs_note.set_text ("");
+	jump_fa.type = FollowAction::JumpTrigger;
+	if (_right_fa) {
+		trigger ()->set_follow_action1 (jump_fa);
+	} else {
+		trigger ()->set_follow_action0 (jump_fa);
+	}
+}
+
+bool
+TriggerJumpDialog::runs_focus_out (GdkEventFocus*)
+{
+	runs_activated ();
+	return false;
 }
 
 void

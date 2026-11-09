@@ -42,7 +42,9 @@
 #include <boost/algorithm/string.hpp>
 
 #include <ytk/gtkpaned.h>
+#include <ytkmm/box.h>
 #include <ytkmm/label.h>
+#include <ytkmm/spinbutton.h>
 #include <ytkmm/paned.h>
 #include <ytkmm/rc.h>
 #include <ytkmm/stock.h>
@@ -1022,32 +1024,99 @@ ARDOUR_UI_UTILS::copy_patch_changes (std::shared_ptr<ARDOUR::Auditioner> a, std:
 	}
 }
 
+/* Spite: the items for scenes [first, end): the scenes themselves when there
+ * are 32 at most, else at most 32 submenus, each filled in when it is first
+ * opened, so a menu of 100,000 scenes makes a handful of items */
+static void
+add_scene_range_items (Gtk::Menu_Helpers::MenuList& items, uint32_t first, uint32_t end, sigc::slot<void, uint32_t> action, std::function<std::string (uint32_t)> label)
+{
+	using namespace Gtk::Menu_Helpers;
+
+	uint64_t const group = 32;
+	uint32_t const count = end - first;
+
+	if (count <= group) {
+		for (uint32_t n = first; n < end; ++n) {
+			items.push_back (MenuElem (label ? label (n) : ARDOUR::cue_marker_name (n), sigc::bind (action, n)));
+		}
+		return;
+	}
+
+	uint64_t span = group; /* scenes per submenu: a power of 32 */
+	while ((count + span - 1) / span > group) {
+		span *= group;
+	}
+
+	for (uint64_t a = first; a < end; a += span) {
+		uint32_t const b   = (uint32_t) std::min<uint64_t> (end, a + span);
+		Gtk::Menu*     sub = Gtk::manage (new Gtk::Menu);
+		sub->set_name ("ArdourContextMenu");
+		items.push_back (MenuElem (string_compose ("%1-%2", ARDOUR::cue_marker_name (a), ARDOUR::cue_marker_name (b - 1)), *sub));
+
+		auto fill = [sub, a, b, action, label] () {
+			if (sub->items ().empty ()) {
+				add_scene_range_items (sub->items (), (uint32_t) a, b, action, label);
+			}
+		};
+		items.back ().signal_select ().connect (fill);
+		sub->signal_show ().connect (fill);
+	}
+}
+
 void
 ARDOUR_UI_UTILS::add_scene_menu_items (Gtk::Menu_Helpers::MenuList& items, uint32_t n_scenes, sigc::slot<void, uint32_t> action, std::function<std::string (uint32_t)> label)
 {
 	using namespace Gtk::Menu_Helpers;
 
-	uint32_t const group = 32;
-
-	auto name = [&label] (uint32_t n) { return label ? label (n) : ARDOUR::cue_marker_name (n); };
-
-	if (n_scenes <= group) {
+	if (n_scenes > 64) {
+		items.push_back (MenuElem (_("Scene Number..."), [n_scenes, action] () {
+			int const n = ask_scene_number (_("Scene Number"), n_scenes);
+			if (n >= 0) {
+				action ((uint32_t) n);
+			}
+		}));
+		items.push_back (SeparatorElem ());
+	} else if (n_scenes > 32) {
+		/* two short submenus are no better than one list */
 		for (uint32_t n = 0; n < n_scenes; ++n) {
-			items.push_back (MenuElem (name (n), sigc::bind (action, n)));
+			items.push_back (MenuElem (label ? label (n) : ARDOUR::cue_marker_name (n), sigc::bind (action, n)));
 		}
 		return;
 	}
 
-	for (uint32_t first = 0; first < n_scenes; first += group) {
-		uint32_t const   end = std::min (n_scenes, first + group);
-		Gtk::Menu*       sub = Gtk::manage (new Gtk::Menu);
-		MenuList&        sitems (sub->items ());
-		sub->set_name ("ArdourContextMenu");
-		for (uint32_t n = first; n < end; ++n) {
-			sitems.push_back (MenuElem (name (n), sigc::bind (action, n)));
-		}
-		items.push_back (MenuElem (string_compose ("%1-%2", ARDOUR::cue_marker_name (first), ARDOUR::cue_marker_name (end - 1)), *sub));
+	add_scene_range_items (items, 0, n_scenes, action, label);
+}
+
+int
+ARDOUR_UI_UTILS::ask_scene_number (std::string const& title, uint32_t n_scenes, uint32_t initial)
+{
+	if (n_scenes == 0) {
+		return -1;
 	}
+
+	ArdourDialog    d (title, true);
+	Gtk::Adjustment adj (std::min (initial, n_scenes - 1) + 1, 1, n_scenes, 1, 10);
+	Gtk::SpinButton spin (adj, 1, 0);
+	Gtk::Label      l (string_compose (_("Scene (1 to %1):"), n_scenes));
+	Gtk::HBox       hb;
+
+	spin.set_numeric (true);
+	spin.set_activates_default (true);
+	hb.set_spacing (6);
+	hb.pack_start (l, false, false);
+	hb.pack_start (spin, true, true);
+	d.get_vbox ()->pack_start (hb, false, false, 6);
+	d.add_button (Gtk::Stock::CANCEL, Gtk::RESPONSE_CANCEL);
+	d.add_button (Gtk::Stock::OK, Gtk::RESPONSE_ACCEPT);
+	d.set_default_response (Gtk::RESPONSE_ACCEPT);
+	hb.show_all ();
+	spin.grab_focus ();
+
+	if (d.run () != Gtk::RESPONSE_ACCEPT) {
+		return -1;
+	}
+	spin.update ();
+	return (int) spin.get_value_as_int () - 1;
 }
 
 void

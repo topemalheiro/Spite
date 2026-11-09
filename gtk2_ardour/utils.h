@@ -123,10 +123,15 @@ bool convert_drop_to_paths (std::vector<std::string>&, const Gtk::SelectionData&
 void format_position (ARDOUR::Session*, Temporal::timepos_t const& pos, char* buf, size_t bufsize, bool onoff = true);
 
 /* Spite: one menu item per scene, labelled label (n) (cue_marker_name ()
- * when empty), calling action (n). Past 32 scenes they go into submenus of
- * 32 ("1-32", "33-64", ...), so a session with hundreds of scenes still has
- * usable menus.
+ * when empty), calling action (n). Past 64 scenes they go into nested
+ * submenus of at most 32 items ("1-32", "33-64", ... and "1-1024" above
+ * those), each filled in when it is first opened, after a "Scene Number..."
+ * item that asks for one: menus stay quick with any number of scenes.
  */
 void add_scene_menu_items (Gtk::Menu_Helpers::MenuList&, uint32_t n_scenes, sigc::slot<void, uint32_t> action, std::function<std::string (uint32_t)> label = std::function<std::string (uint32_t)> ());
+
+/* Spite: asks for a scene by its number (1 to n_scenes, `initial` shown
+ * first); the scene's index, or -1 if cancelled */
+int ask_scene_number (std::string const& title, uint32_t n_scenes, uint32_t initial = 0);
 
 } // namespace

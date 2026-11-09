@@ -10,6 +10,12 @@
      <Binding key="F8" action="Cues/trigger-cue-7"/>
      <Binding key="Delete" action="Cues/clear-trigger-slot"/>
      <Binding key="BackSpace" action="Cues/clear-trigger-slot-alt"/>
+     <!-- Spite: the scenes scroll together -->
+     <Binding key="Page_Down" action="Cues/scenes-page-down"/>
+     <Binding key="Page_Up" action="Cues/scenes-page-up"/>
+     <Binding key="Primary-Home" action="Cues/scenes-first"/>
+     <Binding key="Primary-End" action="Cues/scenes-last"/>
+     <Binding key="Primary-g" action="Cues/go-to-scene"/>
 
 
     <Binding key="Tertiary-l" action="Cues/ToggleTriggerList" group="Window Visibility"/>

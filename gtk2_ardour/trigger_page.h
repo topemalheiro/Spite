@@ -19,6 +19,7 @@
 #pragma once
 
 #include <ytkmm/box.h>
+#include <ytkmm/eventbox.h>
 
 #include "ardour/session_handle.h"
 
@@ -215,7 +216,9 @@ private:
 	 * with the strips.
 	 */
 	Gtk::VBox      _master_column;
-	Gtk::Viewport* _master_viewport;
-	void           sync_master_scroll ();
+	/* Spite: no master bus: the plain scene column, its scrollbar, and room
+	 * as tall as the strips' mixers so its rows line up with theirs */
+	Gtk::HBox      _cue_hbox;
+	Gtk::EventBox  _cue_mixer_space;
 };
 

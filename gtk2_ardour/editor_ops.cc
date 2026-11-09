@@ -6400,8 +6400,10 @@ Editor::play_solo_selection (bool restart)
 
 	} else if (! selection->triggers.empty()) {  //a Trigger is selected, so we solo its parent Stripable
 		TriggerSelection ts = selection->triggers;
-		TriggerEntry* entry = *ts.begin();
-		TriggerPtr slot = entry->trigger();
+		TriggerPtr slot = ts.front ().trigger ();
+		if (!slot) {
+			return;
+		}
 		ARDOUR::SessionObject *obj = slot->box().owner();
 		std::shared_ptr<Stripable> shared_strip = _session->stripable_by_id(obj->id());
 		StripableList sl;  sl.push_back(std::shared_ptr<Stripable>(shared_strip));

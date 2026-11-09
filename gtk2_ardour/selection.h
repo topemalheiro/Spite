@@ -122,7 +122,7 @@ public:
 	bool selected (RegionView*) const;
 	bool selected (ArdourMarker*) const;
 	bool selected (ControlPoint*) const;
-	bool selected (TriggerEntry*) const;
+	bool selected (ARDOUR::TriggerReference const&) const;
 
 	/* ToDo: some region operations (midi quantize, audio reverse) expect
 	 * a RegionSelection (a list of regionviews).  We're likely going to
@@ -147,7 +147,7 @@ public:
 	void set (ControlPoint *);
 	void set (ArdourMarker*);
 	void set (const RegionSelection&);
-	void set (TriggerEntry*);
+	void set (ARDOUR::TriggerReference const&);
 
 	void toggle (TimeAxisView*);
 	void toggle (const TrackViewList&);
@@ -162,7 +162,7 @@ public:
 	void toggle (ControlPoint *, bool single = true);
 	void toggle (std::vector<ControlPoint*> const &);
 	void toggle (ArdourMarker*);
-	void toggle (TriggerEntry*);
+	void toggle (ARDOUR::TriggerReference const&);
 
 	void add (TimeAxisView*);
 	void add (const TrackViewList&);
@@ -180,7 +180,7 @@ public:
 	void add (const std::list<ArdourMarker*>&);
 	void add (const RegionSelection&);
 	void add (const PointSelection&);
-	void add (TriggerEntry*);
+	void add (ARDOUR::TriggerReference const&);
 
 	void remove (TimeAxisView*);
 	void remove (const TrackViewList&);
@@ -196,7 +196,7 @@ public:
 	void remove (const std::list<Selectable*>&);
 	void remove (ArdourMarker*);
 	void remove (ControlPoint *);
-	void remove (TriggerEntry*);
+	void remove (ARDOUR::TriggerReference const&);
 
 	void remove_regions (TimeAxisView *);
 

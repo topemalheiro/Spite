@@ -42,6 +42,10 @@
 #include "plugin_ui.h"
 #include "public_editor.h"
 #include "trigger_master.h"
+#include <ytkmm/scrollbar.h>
+#include <ytkmm/sizegroup.h>
+
+#include "scene_scroll.h"
 #include "trigger_strip.h"
 #include "ui_config.h"
 
@@ -68,7 +72,7 @@ TriggerStrip::TriggerStrip (Session* s, std::shared_ptr<ARDOUR::Route> rt)
 	, input_button (true)
 	, output_button (false)
 	, _processor_box (s, std::bind (&TriggerStrip::plugin_selector, this), _pb_selection, 0)
-	, _trigger_display (*this, -1., TriggerBox::default_triggers_per_box * 16.)
+	, _trigger_display (*this, -1., 2 * TriggerBoxWidget::slot_height ()) /* Spite: at least; it fills the strip */
 	, _panners (s)
 	, _level_meter (s)
 	, _is_master (rt->is_master ())
@@ -183,25 +187,40 @@ TriggerStrip::init ()
 		global_vpacker.pack_start (*rec_toggle_button, Gtk::PACK_SHRINK);
 	}
 
+	/* Spite: the clip grid (or scene column) takes the height the strip has
+	 * above its mixer, like Live's Session View; it shows the scenes the
+	 * page's scene scroll is at (SceneScroll), and only the strips' row
+	 * scrolls sideways.
+	 */
 	if (_is_master) {
 		/* scene launch buttons and "stop all", sized like the tracks' clip slots and stop button */
-		_cue_box = manage (new CueBoxWidget (-1., TriggerBox::default_triggers_per_box * 16.));
+		_cue_box = manage (new CueBoxWidget (-1., 2 * TriggerBoxWidget::slot_height ()));
 		_cue_master_widget = manage (new FittedCanvasWidget (-1., 16.));
 		_cue_master = new CueMaster (_cue_master_widget->root ());
-		global_vpacker.pack_start (*_cue_box, Gtk::PACK_SHRINK);
+		Gtk::VScrollbar* scenes = manage (new Gtk::VScrollbar (SceneScroll::instance ().adjustment ()));
+		_cue_hbox.pack_start (*_cue_box, true, true);
+		_cue_hbox.pack_start (*scenes, false, false);
+		global_vpacker.pack_start (_cue_hbox, true, true);
 		global_vpacker.pack_start (*_cue_master_widget, Gtk::PACK_SHRINK);
 		_cue_box->show ();
+		scenes->show ();
+		_cue_hbox.show ();
 		_cue_master_widget->show ();
 	} else {
-		global_vpacker.pack_start (_trigger_display, Gtk::PACK_SHRINK);
+		global_vpacker.pack_start (_trigger_display, true, true);
 		global_vpacker.pack_start (_tmaster_widget, Gtk::PACK_SHRINK);
 	}
-	global_vpacker.pack_start (_processor_box, true, true);
-	global_vpacker.pack_start (_device_space, true, true);
-	global_vpacker.pack_start (_panners, Gtk::PACK_SHRINK);
-	global_vpacker.pack_start (mute_solo_table, Gtk::PACK_SHRINK);
-	global_vpacker.pack_start (volume_table, Gtk::PACK_SHRINK);
-	global_vpacker.pack_start (output_button, Gtk::PACK_SHRINK);
+	_mixer_section.set_spacing (2);
+	_mixer_section.pack_start (_processor_box, Gtk::PACK_SHRINK);
+	_mixer_section.pack_start (_panners, Gtk::PACK_SHRINK);
+	_mixer_section.pack_start (mute_solo_table, Gtk::PACK_SHRINK);
+	_mixer_section.pack_start (volume_table, Gtk::PACK_SHRINK);
+	_mixer_section.pack_start (output_button, Gtk::PACK_SHRINK);
+	global_vpacker.pack_start (_mixer_section, Gtk::PACK_SHRINK);
+	mixer_size_group ()->add_widget (_mixer_section);
+	_mixer_section.show ();
+	/* the device list, when shown, has the height of a few devices */
+	_processor_box.set_size_request (-1, rintf (100.f * std::max (1.f, UIConfiguration::instance ().get_ui_scale ())));
 
 	/* Mute & Solo */
 	mute_solo_table.set_homogeneous (true);
@@ -272,16 +291,24 @@ TriggerStrip::ui_parameter_changed (std::string const& p)
 	}
 }
 
+/* Spite: the strips' mixer sections, as tall as the tallest */
+Glib::RefPtr<Gtk::SizeGroup>
+TriggerStrip::mixer_size_group ()
+{
+	static Glib::RefPtr<Gtk::SizeGroup> group = Gtk::SizeGroup::create (Gtk::SIZE_GROUP_VERTICAL);
+	return group;
+}
+
 void
 TriggerStrip::update_device_visibility ()
 {
+	/* the grid takes the room the device list leaves: clip slots, then the
+	 * mixer at the bottom, like Live */
+	_device_space.hide ();
 	if (UIConfiguration::instance ().get_cue_strip_show_devices ()) {
-		_device_space.hide ();
 		_processor_box.show ();
 	} else {
-		/* clip slots, empty space, then the mixer at the bottom, like Live */
 		_processor_box.hide ();
-		_device_space.show ();
 	}
 }
 
