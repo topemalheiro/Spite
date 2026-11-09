@@ -25,8 +25,13 @@
 """Convert a Max for Live device (.amxd) or a Max patch (.maxpat) into a
 plugdata patch.
 
-    m4l2pd.py DEVICE.amxd OUTDIR      -> OUTDIR/<name>/<name>.pd (+ abstractions)
-    m4l2pd.py --install [--data DIR] [--lv2 DIR] DEVICE.amxd...
+    m4l2pd.py [--objects old|new] DEVICE.amxd OUTDIR   -> OUTDIR/<name>/<name>.pd (+ abstractions)
+    m4l2pd.py [--objects old|new] --install [--data DIR] [--lv2 DIR] DEVICE.amxd...
+
+--objects new uses PgD4S's own objects and options for Max for Live devices
+(knob names and needles, Live's number boxes, [spite.tab], [pcontrol],
+[thispatcher], subpatches that open in presentation); the default, old, uses
+stock plugdata objects and stand-in subpatches.
 
 --install converts into ~/.local/share/spite9/m4l/<name>/ and writes one LV2
 preset per converted device into ~/.lv2/spite-m4l.lv2/, for plugdata-fx
@@ -145,6 +150,11 @@ def num(v, default=0):
 
 
 # ---------------------------------------------------------------- objects
+
+# PgD4S's own objects and options for Max for Live devices (see tools/m4l/README.md):
+# knob and number box attributes, [spite.tab], [pcontrol], [thispatcher], subpatches that open
+# in presentation. Off ('old'): stock plugdata objects and stand-in subpatches.
+NEW_OBJECTS = False
 
 # Max names whose plugdata object differs or needs a library prefix. Names not
 # listed pass through: plugdata registers cyclone's Max clones under their
@@ -493,6 +503,7 @@ class PdObj:
         self.nin, self.nout = nin, nout
         self.pres = pres        # (x, y) on the face, or None
         self.kind = kind        # 'obj', 'msg' or 'text': a text box that takes the Max box's width
+        self.attrs = []         # PgD4S attributes: (key, value text), written as '#X attr'
 
     def _pos_line(self):
         """the index of the line that holds the object's position"""
@@ -692,6 +703,19 @@ def dial(b, xy, rect, face):
     x, y = xy
     objs = [PdObj('#X obj %d %d %s;' % (x + kx, y + ky, knob), (x + kx, y + ky, size + 1, size + 1),
                   1, 1, (int(face[0]) + kx, int(face[1]) + ky) if face else None)]
+    if NEW_OBJECTS:
+        if showname:
+            name = v.get('parameter_shortname') or v.get('parameter_longname') or ''
+            objs[0].attrs += [('name', pd_symbol_words(name)), ('namesize', '10'),
+                              ('namecolor', color(b.get('textcolor'), LIVE['text']))]
+        if appearance == 1:
+            objs[0].attrs.append(('needle', 'plain'))
+        if shownumber and not unit:
+            u = UNITS.get(int(num(v.get('parameter_unitstyle', 1))), '')
+            if u:
+                objs[0].attrs.append(('unit', u))
+            objs[0].attrs.append(('decimals', str(live_decimals(v, w))))
+        showname = False
     if showname:
         name = v.get('parameter_shortname') or v.get('parameter_longname') or ''
         objs.append(note(name, (x, y), int(w), color(b.get('textcolor'), LIVE['text']), 1,
@@ -716,6 +740,22 @@ def normalized(lo, hi, exp, xy):
         e = 'expr ($f1 - %s) / %s' % (lo, span)
     e = e.replace('- -', '+ ')
     return PdObj('#X obj %d %d %s;' % (xy[0], xy[1], e.replace('$', '\\$')), text_bounds(xy[0], xy[1], e, 1, 1), 1, 1)
+
+
+def pd_symbol_words(text):
+    """text with spaces as one '#X attr' value (rest of the line, spaces escaped)"""
+    return ' '.join(pd_symbol(t) for t in str(text).split()) or '-'
+
+
+def live_decimals(v, w):
+    """the decimals Live shows: none for integers and semitones, two for plain floats (one in a
+    narrow box), one with a unit"""
+    style = int(num(v.get('parameter_unitstyle', 1)))
+    if v.get('parameter_type') == 1 or style in (0, 7):
+        return 0
+    if style == 1:
+        return 2 if w >= 30 else 1
+    return 1
 
 
 def note(text, xy, w, col, just, pres, size=11):
@@ -746,7 +786,18 @@ def numbox(b, xy, rect, face):
                 pd_symbol(unit) if unit else 'empty', int(w) - unit_w + 1, int(h / 2), fs,
                 LIVE['bg'], fg, fg, init))
     exp = num(v.get('parameter_exponent', 1)) or 1
+    if NEW_OBJECTS:
+        # the unit is drawn after the value, inside the box, and the triangle goes: all digits
+        digits = max(1, int(round((w - 5 - hh // 2) * 36.0 / (fs * 31))))
+        lines = ('#X obj %d %d nbx %d %d %s %s 0 %d empty empty empty 0 -8 0 %d %s %s %s %s 256;'
+                 % (xy[0], xy[1], digits, hh, lo, hi, 1 if init_on else 0, fs, LIVE['bg'], fg, fg, init))
     objs = [PdObj(lines, (xy[0], xy[1], int(w), int(h)), 1, 1, (int(face[0]), int(face[1])) if face else None)]
+    if NEW_OBJECTS:
+        objs[0].attrs += [('arrow', '0'), ('fill', '0' if b.get('appearance') == 4 else '1'),
+                          ('decimals', str(live_decimals(v, w))),
+                          ('align', ('left', 'center', 'right')[int(num(b.get('textjustification', 1))) % 3])]
+        if unit:
+            objs[0].attrs.append(('unit', unit))
     if 1 not in b.get('_used', {0}):
         return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
     objs.append(normalized(lo, hi, exp, (xy[0], xy[1] + int(h) + 8)))
@@ -795,8 +846,40 @@ def toggle_button(b, xy, rect, face, conv):
     return Tr(objs, outmap={0: (0, 0)}, inmap={0: (0, 0)})
 
 
+def spite_tab(b, xy, rect, face, conv):
+    """live.tab -> PgD4S's [spite.tab]: Max's grid, spacing, colours and pictures (the device's
+    own SVGs, recoloured like live.tab's remapsvgcolors)"""
+    items = menu_items(b) or ['0', '1']
+    n = len(items)
+    rows = max(1, int(num(b.get('num_lines_presentation' if face else 'num_lines_patching', 1)) or 1))
+    v, init_on = param_flags(b)
+    init = int(num((v.get('parameter_initial') or [0])[0] if isinstance(v.get('parameter_initial'), list) else 0))
+    w, h = int(rect[2]), int(rect[3])
+    spacing = int(num(b.get('spacing_y', b.get('spacing_x', 1))))
+    pics = []
+    for name in (b.get('pictures') or []):
+        base = os.path.basename(str(name))
+        if os.path.exists(os.path.join(conv.outdir, base)):
+            pics.append(pd_symbol(base))
+        else:
+            conv.warn('picture %s is not in the device' % base)
+            pics.append('-')
+    fs = max(6, int(round(num(b.get('fontsize', 9.5)))))
+    line = ('#X obj %d %d spite.tab %d %d %d 0 %d %d %d %s %s %s %s empty empty %d %d %d %s%s;'
+            % (xy[0], xy[1], w, h, rows, spacing, int(num(b.get('rounded', 0)) > 0) * 3, fs,
+               color(b.get('bgcolor'), LIVE['cell']), color(b.get('textcolor'), LIVE['text']),
+               color(b.get('bgoncolor') or b.get('activebgoncolor'), LIVE['cellon']),
+               color(b.get('textoncolor') or b.get('activetextoncolor'), '#ffffff'),
+               init, 1 if init_on else 0, n, ' '.join(pd_symbol(i) for i in items),
+               (' ' + ' '.join(pics + ['-'] * (n - len(pics)))) if pics else ''))
+    return Tr(PdObj(line, (xy[0], xy[1], w, h), 1, 2, (int(face[0]), int(face[1])) if face else None),
+              outmap={0: (0, 0), 1: (0, 1)}, inmap={0: (0, 0)})
+
+
 def tab(b, xy, rect, face, conv):
     """live.tab -> a grid of cells; with pictures, the device's SVGs rendered to PNG on [pic]s"""
+    if NEW_OBJECTS:
+        return spite_tab(b, xy, rect, face, conv)
     items = menu_items(b) or ['0', '1']
     n = len(items)
     rows = max(1, int(num(b.get('num_lines_presentation' if face else 'num_lines_patching', 1)) or 1))
@@ -1073,10 +1156,15 @@ class Converter:
             src = byid.get(pl['source'][0])
             if dst and src and dst.get('maxclass') == 'scope~' and src.get('maxclass') == 'message':
                 src['text'] = re.sub(r'(^|,\s*)(?:presentation_size|patching_size)\b', r'\1dim', src.get('text', ''))
+            if NEW_OBJECTS and src and dst and dst.get('maxclass') == 'message' and \
+                    ((src.get('text') or '').split(' ') or [''])[0] == 'thispatcher':
+                # Max counts the selector in $N: 'window size l t r b' is $3..$6 there, $2..$5 in Pd
+                dst['text'] = re.sub(r'\$(\d+)', lambda m: '$%d' % max(1, int(m.group(1)) - 1), dst.get('text', ''))
         self.delay_lines(boxes, p.get('lines', []))
-        self.window_targets(boxes, p.get('lines', []))
+        if not NEW_OBJECTS:
+            self.window_targets(boxes, p.get('lines', []))
         own = None
-        if any(((b.get('text') or '').split(' ') or [''])[0] == 'thispatcher' for b in boxes):
+        if not NEW_OBJECTS and any(((b.get('text') or '').split(' ') or [''])[0] == 'thispatcher' for b in boxes):
             self.canvases += 1
             own = 'cv%d' % self.canvases
         lines, ports, pres, count = [], {}, [], 0
@@ -1165,6 +1253,12 @@ class Converter:
                 lines.append('#X presentation size %d %d;' % size)
             for idx, (px, py) in pres:
                 lines.append('#X presentation obj %d %d %d;' % (idx, px, py))
+        if NEW_OBJECTS and p.get('openinpresentation') and not device and not gop:
+            lines.append('#X presentation open 1;')
+        for base, tr, b in ports.values():
+            for k, o in enumerate(tr.objs):
+                for key, value in o.attrs:
+                    lines.append('#X attr %d %s %s;' % (base + k, key, value))
         return lines
 
     def layout(self, ports, extra):
@@ -1330,6 +1424,8 @@ class Converter:
                 return sub(thisdevice_sub(xy), 'live.thisdevice', 1, 3)
             if name == 'live.colors' and used - {0}:
                 return sub(inert_sub(xy, 'live.colors', max(nout, 1)), 'live.colors', 1, max(nout, 1))
+            if name in ('pcontrol', 'thispatcher') and NEW_OBJECTS:
+                return obj(name, 1)
             if name == 'pcontrol':
                 return sub(self.pcontrol_sub(xy, b.get('_opens', [])), 'pcontrol', 1, 1)
             if name == 'thispatcher':
@@ -1738,7 +1834,11 @@ def default_dirs():
 
 
 def main(argv):
+    global NEW_OBJECTS
     args = argv[1:]
+    if len(args) >= 2 and args[0] == '--objects':
+        NEW_OBJECTS = args[1] == 'new'
+        args = args[2:]
     if args and args[0] == '--install':
         # m4l2pd.py --install [--data DIR] [--lv2 DIR] DEVICE.amxd...
         data, lv2 = default_dirs()

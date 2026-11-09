@@ -15,6 +15,8 @@ In Spite, add **PgD4S-fx** (for audio effects) or **PgD4S** (for instruments and
 
 ## What converts
 
+With `--objects new`, the converter uses PgD4S's own objects and options for these devices: knobs that draw their name and Live's tiny needles, Live's plain number boxes (no arrow, decimals, unit), `spite.tab` for `live.tab`, real `pcontrol` and `thispatcher` objects, and subpatches that open as a window on their presentation. Without it, it uses stock plugdata objects and stand-in subpatches.
+
 - **The face.** Max's presentation layout becomes PgD4S's own presentation layout (`#X presentation` lines): every object keeps its patching position and also gets its presentation one. The patch window looks like Max's patching view; the Device view, PgD4S's plugin mode and its presentation mode show the face. Bpatchers become graph-on-parent windows onto their own presentation layout.
 - **The patch's layout.** plugdata draws box text larger than Max, so the patching view is Max's layout widened to fit it: every box keeps its Max width in that scale, and rows move apart only where plugdata's boxes (or the helpers a translation adds) would overlap when Max's don't. Every cord stays.
 - **Tidy cords.** Cords routed with midpoints in Max keep their route, as PgD4S's segmented connections.
