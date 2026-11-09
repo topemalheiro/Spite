@@ -992,6 +992,11 @@ TriggerPage::show_clip_view ()
 		return; /* its track went away */
 	}
 
+	/* Spite: the clip view takes room from the grids: once they have their
+	 * new height, keep the selected slot in view, as Live does */
+	uint32_t const slot = ref.slot ();
+	Glib::signal_idle ().connect ([slot] () { SceneScroll::instance ().show_row (slot); return false; });
+
 	if (box->data_type () == DataType::AUDIO) {
 
 		_audio_trig_box.set_trigger (ref);
