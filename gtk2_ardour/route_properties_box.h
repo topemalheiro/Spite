@@ -20,12 +20,15 @@
 
 #pragma once
 
+#include <list>
 #include <string>
 #include <vector>
 
 #include <ytkmm/box.h>
 #include <ytkmm/label.h>
 #include <ytkmm/scrolledwindow.h>
+
+#include "pbd/id.h"
 
 #include "ardour/ardour.h"
 #include "ardour/session_handle.h"
@@ -53,6 +56,7 @@ public:
 
 	void set_session (ARDOUR::Session*);
 	void set_route (std::shared_ptr<ARDOUR::Route>, bool force = false);
+	std::shared_ptr<ARDOUR::Route> route () const { return _route; }
 	/* shown instead of an empty strip when the track has no plugins; empty for none */
 	void set_empty_text (std::string const&);
 
@@ -79,8 +83,11 @@ private:
 	void session_going_away ();
 	void drop_route ();
 	void drop_plugin_uis ();
+	void drop_generic_uis ();
 	void refill_processors ();
 	void add_processor_to_display (std::weak_ptr<ARDOUR::Processor> w);
+	void face_gone (class DeviceFace*);
+	void delete_face (class DeviceFace*);
 	void idle_refill_processors ();
 	void surround_master_added_or_removed ();
 
@@ -99,7 +106,13 @@ private:
 	bool                 _always_show_insert;
 	bool                 _device_faces;
 	float                _face_zoom;
-	std::vector<class DeviceFace*> _faces;
+	std::vector<class DeviceFace*> _faces; /* the track's, as shown */
+	/* Spite: the faces of the tracks shown last are kept, hidden, so going back to one is
+	 * instant: all faces stay in _box (a live X11 GUI must never be re-parented) */
+	std::vector<class DeviceFace*> _all_faces;
+	std::list<PBD::ID>             _recent_routes; /* the one shown first */
+	std::vector<Gtk::Widget*>      _generic_frames;
+	int                            _display_pos;
 
 	int face_height () const;
 	int title_height () const;

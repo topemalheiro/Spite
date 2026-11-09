@@ -17,12 +17,15 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <ytkmm/widget.h>
 
 #include "pbd/compose.h"
 
 #include "ardour/audio_track.h"
+#include "ardour/audioengine.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/port_insert.h"
 #include "ardour/route.h"
@@ -143,16 +146,29 @@ ProcessorUIFrame::save_state () const
 
 /* Spite: a device in the Cue page's Device view that shows the plugin's own GUI as its face,
  * under a title bar, like Live's device chain. Used for PgD4S (plugdata for Spite), whose GUI
- * then shows the patch in plugin mode: a converted Max for Live device's presentation. */
+ * then shows the patch in plugin mode: a converted Max for Live device's presentation.
+ *
+ * A face keeps its last picture (see FaceMemory): it shows that at the face's size until its
+ * GUI is ready, so a face never shows up collapsed, and washed out while the device's own
+ * window is open, as Live does (one PgD4S editor per plugin, so the face's GUI has to go). */
 class DeviceFace : public Gtk::VBox
 {
 public:
-	DeviceFace (std::shared_ptr<Processor>, std::shared_ptr<PlugInsertBase>, std::shared_ptr<LV2Plugin>, int face_h, int title_h);
+	DeviceFace (std::shared_ptr<Route>, std::shared_ptr<Processor>, std::shared_ptr<PlugInsertBase>, std::shared_ptr<LV2Plugin>, int face_h, int title_h);
 	~DeviceFace ();
 
 	/* free the GUI: before the face leaves its container (a live X11 GUI must never be re-parented) */
 	void release ();
 	void set_face_height (int);
+	/* keep a picture of the face as it is on screen now, if it is */
+	void snapshot ();
+
+	PBD::ID const&             route_id () const { return _route_id; }
+	std::shared_ptr<Processor> processor () const { return _proc; }
+	std::shared_ptr<LV2Plugin> plugin () const { return _lv2; }
+
+	/* the processor went away (RoutePropertiesBox deletes the face) */
+	PBD::ScopedConnection gone_connection;
 
 protected:
 	void on_map ();
@@ -161,24 +177,29 @@ protected:
 
 private:
 	bool idle_show_face ();
-	bool idle_hide_face ();
 	void gui_showing (PlugInsertBase*);
 	void gui_hidden (PlugInsertBase*);
 	bool title_press (GdkEventButton*);
+	void show_picture (bool washed);
+	void size_body ();
 
 	Gtk::EventBox                   _title;
 	Gtk::HBox                       _title_box;
 	ArdourButton                    _enable_btn;
 	Gtk::Label                      _name;
 	Gtk::VBox                       _body;
+	Gtk::Image                      _picture;
 	Gtk::Label                      _placeholder;
 	LV2PluginUI*                    _ui;
 	std::shared_ptr<Processor>      _proc;
 	std::shared_ptr<PlugInsertBase> _pib;
+	std::shared_ptr<LV2Plugin>      _lv2;
+	PBD::ID                         _route_id;
 	int                             _face_h;
 	float                           _scale;
+	bool                            _picture_washed;
 	sigc::connection                _idle;
-	sigc::connection                _unmap_idle;
+	sigc::connection                _snap_timer;
 	sigc::connection                _showing_connection;
 	sigc::connection                _hidden_connection;
 	PBD::ScopedConnectionList       _connections;
@@ -210,6 +231,105 @@ spite_cue_log (std::string const& msg)
 	g_date_time_unref (now);
 }
 
+/* Spite: with SPITE_DSP_PROBE set in the environment, the log also gets the audio cycles that
+ * took more than half their period, next to the faces' events. One past its period is an
+ * xrun with JACK, and with PipeWire it glitches every app's sound. */
+static std::atomic<int> spite_engine_xruns (0);
+
+static bool
+spite_dsp_probe ()
+{
+	if (int const x = spite_engine_xruns.exchange (0)) {
+		/* the engine's own: a cycle skipped (the process lock was busy) or one the backend lost */
+		spite_cue_log (string_compose ("audio: %1 engine xrun(s) -- XRUN", x));
+	}
+	AudioEngine*      e  = AudioEngine::instance ();
+	PBD::TimingStats& st = e->dsp_stats[AudioEngine::ProcessCallback];
+	PBD::microseconds_t mn, mx;
+	double              avg, dev;
+	if (!e->running () || e->sample_rate () == 0 || !st.get_stats (mn, mx, avg, dev)) {
+		return true;
+	}
+	double const period = 1e6 * e->samples_per_cycle () / (double) e->sample_rate ();
+	if (mx > period / 2) {
+		spite_cue_log (string_compose ("audio: a cycle took %1 ms of its %2 ms%3", mx / 1000., period / 1000., mx > period ? " -- XRUN" : ""));
+	}
+	st.queue_reset ();
+	return true;
+}
+
+static void
+spite_dsp_probe_start ()
+{
+	static bool started = false;
+	if (!started && g_getenv ("SPITE_DSP_PROBE")) {
+		started = true;
+		spite_cue_log ("audio: logging long cycles");
+		static PBD::ScopedConnection xrun_connection;
+		AudioEngine::instance ()->Xrun.connect_same_thread (xrun_connection, [] () { ++spite_engine_xruns; });
+		Glib::signal_timeout ().connect (sigc::ptr_fun (&spite_dsp_probe), 50);
+	}
+}
+
+/* Spite: what the Device view remembers of each face, by processor: its last picture, which
+ * also gives its width for its height. Kept for the run, and as a PNG in Spite's cache folder
+ * (one folder per session) so a face has its size and picture from the start next time. */
+struct FaceMemory {
+	Glib::RefPtr<Gdk::Pixbuf> picture;
+	bool                      loaded = false; /* looked for the PNG */
+};
+
+static std::map<PBD::ID, FaceMemory> face_memory;
+
+static std::string
+face_picture_path (PBD::ID const& id)
+{
+	Session* s = ARDOUR_UI::instance ()->the_session ();
+	if (!s) {
+		return std::string ();
+	}
+	std::string const dir = Glib::build_filename (ARDOUR::user_cache_directory (), X_("faces"), string_compose ("%1", g_str_hash (s->path ().c_str ())));
+	return Glib::build_filename (dir, id.to_s () + X_(".png"));
+}
+
+static FaceMemory&
+remembered_face (PBD::ID const& id)
+{
+	FaceMemory& m = face_memory[id];
+	if (!m.loaded) {
+		m.loaded = true;
+		std::string const path = face_picture_path (id);
+		if (!path.empty () && Glib::file_test (path, Glib::FILE_TEST_EXISTS)) {
+			try {
+				m.picture = Gdk::Pixbuf::create_from_file (path);
+			} catch (...) {
+			}
+		}
+	}
+	return m;
+}
+
+/* a face whose device's window is open: Live's washed-out look */
+static Glib::RefPtr<Gdk::Pixbuf>
+washed_out (Glib::RefPtr<Gdk::Pixbuf> const& src)
+{
+	Glib::RefPtr<Gdk::Pixbuf> p  = src->copy ();
+	int const                 nc = p->get_n_channels ();
+	int const                 rs = p->get_rowstride ();
+	guint8*                   px = p->get_pixels ();
+	for (int y = 0; y < p->get_height (); ++y) {
+		guint8* c = px + y * rs;
+		for (int x = 0; x < p->get_width (); ++x, c += nc) {
+			int const grey = (c[0] * 30 + c[1] * 59 + c[2] * 11) / 100;
+			for (int k = 0; k < 3; ++k) {
+				int const v = (c[k] + grey) / 2;         /* half the colour */
+				c[k]        = v + (255 - v) * 62 / 100; /* most of the way to white */
+			}
+		}
+	}
+	return p;
+}
+
 /* the device's name, as Live shows it: a converted Max for Live device's own name (its preset
  * is "M4L: <name>"), else the processor's name */
 static std::string
@@ -222,14 +342,17 @@ device_name (std::shared_ptr<Processor> p, std::shared_ptr<LV2Plugin> lv2)
 	return p->display_name ();
 }
 
-DeviceFace::DeviceFace (std::shared_ptr<Processor> p, std::shared_ptr<PlugInsertBase> pib, std::shared_ptr<LV2Plugin> lv2, int face_h, int title_h)
+DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, std::shared_ptr<PlugInsertBase> pib, std::shared_ptr<LV2Plugin> lv2, int face_h, int title_h)
 	: _enable_btn (ArdourButton::just_led_default_elements)
 	, _name (device_name (p, lv2))
 	, _ui (new LV2PluginUI (pib, lv2))
 	, _proc (p)
 	, _pib (pib)
+	, _lv2 (lv2)
+	, _route_id (r->id ())
 	, _face_h (face_h)
 	, _scale (face_h / 169.f) /* a Max for Live device's face is 169 px tall */
+	, _picture_washed (false)
 {
 	_ui->set_embedded (_scale);
 
@@ -253,9 +376,11 @@ DeviceFace::DeviceFace (std::shared_ptr<Processor> p, std::shared_ptr<PlugInsert
 
 	_placeholder.set_text (_("In its window"));
 	_placeholder.set_no_show_all ();
+	_picture.set_no_show_all ();
+	_picture.set_alignment (0, 0);
 	_body.pack_start (*_ui, true, true);
+	_body.pack_start (_picture, true, true);
 	_body.pack_start (_placeholder, true, true);
-	_body.set_size_request (-1, face_h);
 
 	pack_start (_title, false, false);
 	pack_start (_body, false, false); /* the face's own height: no band around it */
@@ -263,6 +388,11 @@ DeviceFace::DeviceFace (std::shared_ptr<Processor> p, std::shared_ptr<PlugInsert
 	_showing_connection = PluginUIWindow::CustomGUIShowing.connect (sigc::mem_fun (*this, &DeviceFace::gui_showing));
 	_hidden_connection  = PluginUIWindow::CustomGUIHidden.connect (sigc::mem_fun (*this, &DeviceFace::gui_hidden));
 	show_all ();
+
+	/* at its size and with its picture from the start, until its GUI is made */
+	_ui->hide ();
+	show_picture (false);
+	size_body ();
 }
 
 DeviceFace::~DeviceFace ()
@@ -277,25 +407,112 @@ void
 DeviceFace::release ()
 {
 	_idle.disconnect ();
-	_unmap_idle.disconnect ();
+	_snap_timer.disconnect ();
 	if (_ui->embed_active ()) {
 		spite_cue_log (string_compose ("face %1: GUI freed", _name.get_text ()));
 		_ui->embed_hide ();
 	}
 }
 
-/* The GUI is made once the face is mapped (OpenGL needs a shown window) and then kept,
- * because making a PgD4S GUI takes a moment and can stall the audio while it builds its
- * patch. Hiding the Device view (the Clip view, another page) doesn't unmap the faces,
- * since they sit in a viewport, which only hides its own window: the GUIs stay, PgD4S
- * stops drawing while its window can't be seen, and coming back is instant. A face that
- * does get unmapped frees its GUI after two minutes; it frees it at once on unrealize,
- * before GTK could re-parent the live X11 GUI. */
+/* the body's size: the GUI's own once it is there, else the picture's (or, with neither, the
+ * face's height only) */
+void
+DeviceFace::size_body ()
+{
+	FaceMemory& m = remembered_face (_proc->id ());
+	if (_ui->embed_active () || !m.picture || m.picture->get_height () < 1) {
+		_body.set_size_request (-1, _face_h);
+	} else {
+		_body.set_size_request (rintf (_face_h * m.picture->get_width () / (float) m.picture->get_height ()), _face_h);
+	}
+}
+
+void
+DeviceFace::show_picture (bool washed)
+{
+	FaceMemory& m = remembered_face (_proc->id ());
+	_picture_washed = washed;
+	if (!m.picture || m.picture->get_height () < 1) {
+		_picture.hide ();
+		if (washed) {
+			_placeholder.show (); /* never seen yet: say where it is */
+		} else {
+			_placeholder.hide ();
+		}
+		return;
+	}
+	Glib::RefPtr<Gdk::Pixbuf> pb = m.picture;
+	if (pb->get_height () != _face_h) {
+		int const w = std::max (1, (int) rintf (_face_h * pb->get_width () / (float) pb->get_height ()));
+		pb          = pb->scale_simple (w, _face_h, Gdk::INTERP_BILINEAR);
+	}
+	_picture.set (washed ? washed_out (pb) : pb);
+	_placeholder.hide ();
+	_picture.show ();
+}
+
+/* the face's pixels, the plugin's own X window and all, read back from the screen: only when
+ * the GUI is up and the whole face can be seen */
+void
+DeviceFace::snapshot ()
+{
+	if (!_ui->embed_active () || !_ui->get_visible () || !_ui->is_mapped ()) {
+		return;
+	}
+	Glib::RefPtr<Gdk::Window> win = _ui->get_window ();
+	if (!win || !win->is_viewable ()) {
+		return;
+	}
+	Gtk::Allocation const a = _ui->get_allocation ();
+	if (a.get_width () < 8 || a.get_height () < 8) {
+		return;
+	}
+	if (GtkWidget* vp = gtk_widget_get_ancestor (GTK_WIDGET (gobj ()), GTK_TYPE_VIEWPORT)) {
+		GtkAdjustment* h = gtk_viewport_get_hadjustment (GTK_VIEWPORT (vp));
+		GtkAdjustment* v = gtk_viewport_get_vadjustment (GTK_VIEWPORT (vp));
+		if ((h && (a.get_x () < h->value || a.get_x () + a.get_width () > h->value + h->page_size))
+		    || (v && (a.get_y () < v->value || a.get_y () + a.get_height () > v->value + v->page_size))) {
+			return; /* scrolled partly out of view */
+		}
+	}
+
+	gdk_error_trap_push ();
+	GdkPixbuf* pb = gdk_pixbuf_get_from_drawable (NULL, win->gobj (), NULL, a.get_x (), a.get_y (), 0, 0, a.get_width (), a.get_height ());
+	gdk_flush ();
+	bool const failed = gdk_error_trap_pop () != 0;
+	if (!pb) {
+		return;
+	}
+	Glib::RefPtr<Gdk::Pixbuf> picture = Glib::wrap (pb);
+	if (failed) {
+		return;
+	}
+	remembered_face (_proc->id ()).picture = picture;
+
+	std::string const path = face_picture_path (_proc->id ());
+	if (!path.empty ()) {
+		/* written when Spite is idle: it's for the next time the session is opened */
+		Glib::signal_idle ().connect ([picture, path] () {
+			g_mkdir_with_parents (Glib::path_get_dirname (path).c_str (), 0755);
+			try {
+				picture->save (path, "png");
+			} catch (...) {
+			}
+			return false;
+		}, Glib::PRIORITY_LOW);
+	}
+}
+
+/* The GUI is made once the face is mapped (OpenGL needs a shown window) and then kept, since
+ * making a PgD4S GUI takes a moment. A face that's hidden (the Device view shows another
+ * track, see RoutePropertiesBox::refill_processors) keeps its GUI: PgD4S stops drawing while
+ * its window can't be seen, and showing it again is instant. The GUI is freed when the face
+ * goes (or on unrealize, before GTK could re-parent the live X11 GUI) and while the device's
+ * own window is open. */
 void
 DeviceFace::on_map ()
 {
 	Gtk::VBox::on_map ();
-	_unmap_idle.disconnect ();
 	_idle.disconnect ();
 	_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
 }
@@ -304,8 +521,7 @@ void
 DeviceFace::on_unmap ()
 {
 	_idle.disconnect ();
-	_unmap_idle.disconnect ();
-	_unmap_idle = Glib::signal_timeout ().connect_seconds (sigc::mem_fun (*this, &DeviceFace::idle_hide_face), 120);
+	_snap_timer.disconnect ();
 	if (_ui->embed_active ()) {
 		_ui->stop_updating (0); /* nothing shows it */
 	}
@@ -320,16 +536,6 @@ DeviceFace::on_unrealize ()
 }
 
 bool
-DeviceFace::idle_hide_face ()
-{
-	if (!get_mapped () && _ui->embed_active ()) {
-		spite_cue_log (string_compose ("face %1: hidden for two minutes", _name.get_text ()));
-		release ();
-	}
-	return false;
-}
-
-bool
 DeviceFace::idle_show_face ()
 {
 	if (!get_mapped ()) {
@@ -337,12 +543,14 @@ DeviceFace::idle_show_face ()
 	}
 	if (PluginUIWindow::custom_gui_shown (_pib.get ())) {
 		_ui->hide ();
-		_placeholder.show ();
+		show_picture (true);
+		size_body ();
 		return false;
 	}
-	_placeholder.hide ();
 	_ui->show ();
 	if (_ui->embed_active ()) {
+		_picture.hide ();
+		_placeholder.hide ();
 		_ui->embed_show (); /* its GUI was kept: updates resume */
 		spite_cue_log (string_compose ("face %1: shown again, GUI kept", _name.get_text ()));
 		return false;
@@ -350,6 +558,16 @@ DeviceFace::idle_show_face ()
 	gint64 const t0 = g_get_monotonic_time ();
 	_ui->embed_show ();
 	spite_cue_log (string_compose ("face %1: GUI made in %2 ms", _name.get_text (), (g_get_monotonic_time () - t0) / 1000));
+	if (_ui->embed_active ()) {
+		_picture.hide ();
+		_placeholder.hide ();
+		size_body ();
+		/* a fresh picture once it has drawn itself */
+		_snap_timer.disconnect ();
+		_snap_timer = Glib::signal_timeout ().connect ([this] () { snapshot (); return false; }, 1500);
+	} else {
+		_ui->hide ();
+	}
 	return false;
 }
 
@@ -360,25 +578,34 @@ DeviceFace::set_face_height (int h)
 		return;
 	}
 	_face_h = h;
-	_body.set_size_request (-1, h); /* PgD4S zooms to spite_lv2_ui_face_height () */
+	size_body (); /* PgD4S zooms to spite_lv2_ui_face_height () */
+	if (_picture.get_visible ()) {
+		show_picture (_picture_washed);
+	}
 }
 
 void
 DeviceFace::gui_showing (PlugInsertBase* pib)
 {
 	if (pib == _pib.get ()) {
+		/* its window is opening: keep its picture, then let its GUI go (one editor per plugin) */
+		snapshot ();
 		release ();
 		_ui->hide ();
-		_placeholder.show ();
+		show_picture (true);
+		size_body ();
 	}
 }
 
 void
 DeviceFace::gui_hidden (PlugInsertBase* pib)
 {
-	if (pib == _pib.get () && get_mapped ()) {
-		_idle.disconnect ();
-		_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
+	if (pib == _pib.get ()) {
+		show_picture (false); /* until its GUI is back */
+		if (get_mapped ()) {
+			_idle.disconnect ();
+			_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
+		}
 	}
 }
 
@@ -400,6 +627,7 @@ RoutePropertiesBox::RoutePropertiesBox ()
 	, _always_show_insert (false)
 	, _device_faces (false)
 	, _face_zoom (1.f)
+	, _display_pos (0)
 	, _idle_refill_processors_id (-1)
 {
 	_scroller.set_policy (Gtk::POLICY_AUTOMATIC, Gtk::POLICY_NEVER);
@@ -428,6 +656,7 @@ RoutePropertiesBox::RoutePropertiesBox ()
 	show_all();
 
 	ARDOUR_UI::instance()->ActionsReady.connect_same_thread (_forever_connections, std::bind (&RoutePropertiesBox::ui_actions_ready, this));
+	spite_dsp_probe_start ();
 }
 
 RoutePropertiesBox::~RoutePropertiesBox ()
@@ -450,6 +679,7 @@ RoutePropertiesBox::session_going_away ()
 	_insert_frame.remove ();
 	drop_plugin_uis ();
 	drop_route ();
+	face_memory.clear (); /* processor IDs are only unique within a session */
 	delete _insert_box;
 	_insert_box = nullptr;
 }
@@ -498,7 +728,17 @@ RoutePropertiesBox::set_route (std::shared_ptr<Route> r, bool force_update)
 
 	_route->processors_changed.connect (_route_connections, invalidator (*this), std::bind (&RoutePropertiesBox::idle_refill_processors, this), gui_context());
 	_route->PropertyChanged.connect (_route_connections, invalidator (*this), std::bind (&RoutePropertiesBox::property_changed, this, _1), gui_context ());
-	_route->DropReferences.connect (_route_connections, invalidator (*this), std::bind (&RoutePropertiesBox::drop_route, this), gui_context());
+	/* Spite: a track going away takes its faces along, kept ones too */
+	PBD::ID const route_id = _route->id ();
+	_route->DropReferences.connect (_route_connections, invalidator (*this), [this, route_id] () {
+		for (auto const& face : std::vector<DeviceFace*> (_all_faces)) {
+			if (face->route_id () == route_id) {
+				delete_face (face);
+			}
+		}
+		_recent_routes.remove (route_id);
+		drop_route ();
+	}, gui_context());
 
 	std::shared_ptr<AudioTrack> at = std::dynamic_pointer_cast<AudioTrack>(_route);
 	if (at) {
@@ -727,7 +967,14 @@ RoutePropertiesBox::property_changed (const PBD::PropertyChange& what_changed)
 void
 RoutePropertiesBox::drop_route ()
 {
-	drop_plugin_uis ();
+	/* Spite: the track's faces stay, hidden, for when it is shown again */
+	drop_generic_uis ();
+	for (auto const& face : _faces) {
+		face->snapshot ();
+		face->hide ();
+	}
+	_faces.clear ();
+	_insert_frame.hide ();
 	_route.reset ();
 	_route_connections.drop_connections ();
 	if (_idle_refill_processors_id >= 0) {
@@ -739,17 +986,23 @@ RoutePropertiesBox::drop_route ()
 void
 RoutePropertiesBox::drop_plugin_uis ()
 {
-	for (auto const& face : _faces) {
-		face->release (); /* before the face leaves _box */
+	drop_generic_uis ();
+	for (auto const& face : std::vector<DeviceFace*> (_all_faces)) {
+		delete_face (face);
 	}
-	_faces.clear ();
+	_recent_routes.clear ();
+	_insert_frame.hide ();
+}
 
-	std::list<Gtk::Widget*> children = _box.get_children ();
-	for (auto const& child : children) {
-		child->hide ();
-		_box.remove (*child);
-		delete child;
+void
+RoutePropertiesBox::drop_generic_uis ()
+{
+	for (auto const& frame : _generic_frames) {
+		frame->hide ();
+		_box.remove (*frame);
+		delete frame;
 	}
+	_generic_frames.clear ();
 
 	for (auto const& ui : _proc_uis) {
 		ui->stop_updating (0);
@@ -758,7 +1011,32 @@ RoutePropertiesBox::drop_plugin_uis ()
 
 	_processor_connections.drop_connections ();
 	_proc_uis.clear ();
-	_insert_frame.hide ();
+}
+
+/* Spite: a face leaves _box and goes */
+void
+RoutePropertiesBox::delete_face (DeviceFace* face)
+{
+	_all_faces.erase (std::remove (_all_faces.begin (), _all_faces.end (), face), _all_faces.end ());
+	_faces.erase (std::remove (_faces.begin (), _faces.end (), face), _faces.end ());
+	face->release (); /* before the face leaves _box */
+	face->hide ();
+	_box.remove (*face);
+	delete face;
+}
+
+/* Spite: its processor went away (taken out of its track, or the track deleted) */
+void
+RoutePropertiesBox::face_gone (DeviceFace* face)
+{
+	if (std::find (_all_faces.begin (), _all_faces.end (), face) == _all_faces.end ()) {
+		return;
+	}
+	bool const shown = std::find (_faces.begin (), _faces.end (), face) != _faces.end ();
+	delete_face (face);
+	if (shown) {
+		update_processor_box_visibility ();
+	}
 }
 
 void
@@ -780,9 +1058,25 @@ RoutePropertiesBox::add_processor_to_display (std::weak_ptr<Processor> w)
 		std::shared_ptr<LV2Plugin>    lv2 = pi ? std::dynamic_pointer_cast<LV2Plugin> (pi->plugin ()) : std::shared_ptr<LV2Plugin> ();
 		if (lv2 && lv2->has_editor () && !lv2->is_external_ui () && std::string (lv2->uri ()).find ("https://github.com/timothyschoen/plugdata") == 0) {
 			ARDOUR::set_lv2_ui_face_height (face_height ());
-			DeviceFace* face = new DeviceFace (p, pib, lv2, face_height (), title_height ());
+			/* the face kept from before, GUI and all, or a new one */
+			DeviceFace* face = 0;
+			for (auto const& f : _all_faces) {
+				if (f->processor () == p && f->plugin () == lv2 && f->route_id () == _route->id ()) {
+					face = f;
+					break;
+				}
+			}
+			if (!face) {
+				face = new DeviceFace (_route, p, pib, lv2, face_height (), title_height ());
+				_all_faces.push_back (face);
+				_box.pack_start (*face, false, false);
+				p->DropReferences.connect (face->gone_connection, invalidator (*face), std::bind (&RoutePropertiesBox::face_gone, this, face), gui_context ());
+			} else {
+				face->set_face_height (face_height ());
+				face->show ();
+			}
+			_box.reorder_child (*face, _display_pos++);
 			_faces.push_back (face);
-			_box.pack_start (*face, false, false);
 			return;
 		}
 	}
@@ -793,17 +1087,10 @@ RoutePropertiesBox::add_processor_to_display (std::weak_ptr<Processor> w)
 	}
 	//pib->DropReferences.connect (_processor_connections, invalidator (*this), std::bind (&RoutePropertiesBox::refill_processors, this), gui_context());
 	_proc_uis.push_back (plugin_ui);
-#if 0
-	ArdourWidgets::Frame* frame = new ArdourWidgets::Frame ();
-	frame->set_label (p->display_name ());
-	frame->add (*plugin_ui);
-	frame->set_padding (0);
-	_box.pack_start (*frame, false, false);
-	plugin_ui->show ();
-#else
 	ProcessorUIFrame* frame = new ProcessorUIFrame (_route, p, plugin_ui);
 	_box.pack_start (*frame, false, false);
-#endif
+	_box.reorder_child (*frame, _display_pos++);
+	_generic_frames.push_back (frame);
 }
 
 int
@@ -827,25 +1114,67 @@ RoutePropertiesBox::refill_processors ()
 	if (!_session || _session->deletion_in_progress()) {
 		return;
 	}
-	drop_plugin_uis ();
-
 	assert (_route);
 
 	if (!_route) {
+		drop_route ();
 		_idle_refill_processors_id = -1;
 		return;
 	}
 
+	/* Spite: faces aren't made again. The track's own are kept when it is refilled (pins,
+	 * outputs, a device added), and those of the tracks shown last are kept hidden, GUIs
+	 * and all, so going back to one is instant. Each face keeps a picture of itself first. */
+	for (auto const& face : _faces) {
+		face->snapshot ();
+	}
+	drop_generic_uis ();
+	_faces.clear ();
+	_display_pos = 0;
+
+	std::vector<DeviceFace*> const had = _all_faces;
 	_route->foreach_processor (sigc::mem_fun (*this, &RoutePropertiesBox::add_processor_to_display));
+
+	for (auto const& face : std::vector<DeviceFace*> (_all_faces)) {
+		if (std::find (_faces.begin (), _faces.end (), face) != _faces.end ()) {
+			continue;
+		}
+		if (face->route_id () == _route->id ()) {
+			delete_face (face); /* no longer on the track, or a new plugin */
+		} else if (face->get_visible ()) {
+			face->hide ();
+		}
+	}
+
+	/* the last four tracks with faces keep theirs */
+	_recent_routes.remove (_route->id ());
+	if (!_faces.empty ()) {
+		_recent_routes.push_front (_route->id ());
+	}
+	while (_recent_routes.size () > 4) {
+		PBD::ID const old = _recent_routes.back ();
+		_recent_routes.pop_back ();
+		for (auto const& face : std::vector<DeviceFace*> (_all_faces)) {
+			if (face->route_id () == old) {
+				delete_face (face);
+			}
+		}
+	}
+
 	if (_device_faces) {
-		spite_cue_log (string_compose ("devices of %1: %2 faces, %3 other devices", _route->name (), _faces.size (), _proc_uis.size ()));
+		size_t made = 0;
+		for (auto const& face : _faces) {
+			made += std::find (had.begin (), had.end (), face) == had.end ();
+		}
+		spite_cue_log (string_compose ("devices of %1: %2 faces (%3 new), %4 other devices", _route->name (), _faces.size (), made, _proc_uis.size ()));
 	}
 	if (_proc_uis.empty () && _faces.empty ()) {
 		_scroller.hide ();
 	} else if (_device_faces) {
 		/* Spite: Live's proportions; generic devices fit the same height */
 		_box.set_size_request (-1, title_height () + face_height () + 4);
-		_scroller.show_all ();
+		_box.show ();
+		_scroller.show (); /* not show_all (): the kept faces stay hidden */
 	} else {
 		float ui_scale = std::max<float> (1.f, UIConfiguration::instance().get_ui_scale());
 		int h = 100 * ui_scale;
@@ -854,7 +1183,8 @@ RoutePropertiesBox::refill_processors ()
 		}
 		h = std::min<int> (h, 300 * ui_scale);
 		_box.set_size_request (-1, h);
-		_scroller.show_all ();
+		_box.show ();
+		_scroller.show ();
 	}
 	update_processor_box_visibility ();
 	_idle_refill_processors_id = -1;

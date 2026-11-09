@@ -910,6 +910,12 @@ TriggerPage::update_device_view ()
 
 	std::shared_ptr<Route> r = device_route ();
 
+	if (!r) {
+		/* Spite: nothing picked just now (picking a clip deselects its track first): keep
+		 * showing the track shown last, as Live does, instead of dropping its faces */
+		r = _device_box.route ();
+	}
+
 	if (r) {
 		_device_box.set_route (r);
 		_device_empty_label.hide ();
