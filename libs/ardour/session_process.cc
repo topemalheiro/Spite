@@ -1761,15 +1761,24 @@ Session::insert_scene (uint32_t at)
 
 	at = std::min (at, _scene_count);
 
+	/* each box shifts its stored slots in a copy first, then publishes
+	 * it with the process lock held, so that the audio thread sees every
+	 * box's new scenes in the same cycle: O(clips), nothing allocated there
+	 */
+	std::shared_ptr<RouteList const> rl = routes.reader ();
+	std::vector<std::shared_ptr<TriggerBox> > boxes;
+	std::vector<TriggerBox::ShiftPlan> plans;
+	for (auto const & r : *rl) {
+		if (std::shared_ptr<TriggerBox> tb = r->triggerbox ()) {
+			boxes.push_back (tb);
+			plans.push_back (tb->prepare_shift (at, 1));
+		}
+	}
+
 	{
-		/* the RT thread reads the slots without a lock */
 		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
-		std::shared_ptr<RouteList const> rl = routes.reader ();
-		for (auto const & r : *rl) {
-			std::shared_ptr<TriggerBox> tb = r->triggerbox ();
-			if (tb) {
-				tb->insert_slot (at);
-			}
+		for (size_t i = 0; i < boxes.size (); ++i) {
+			boxes[i]->commit_shift (plans[i]);
 		}
 		++_scene_count;
 		int32_t const c = _active_cue.load ();
@@ -1804,17 +1813,25 @@ Session::scene_removable (uint32_t at) const
 bool
 Session::remove_scene (uint32_t at)
 {
+	if (!scene_removable (at)) {
+		return false;
+	}
+
+	/* as in insert_scene () */
+	std::shared_ptr<RouteList const> rl = routes.reader ();
+	std::vector<std::shared_ptr<TriggerBox> > boxes;
+	std::vector<TriggerBox::ShiftPlan> plans;
+	for (auto const & r : *rl) {
+		if (std::shared_ptr<TriggerBox> tb = r->triggerbox ()) {
+			boxes.push_back (tb);
+			plans.push_back (tb->prepare_shift (at, -1));
+		}
+	}
+
 	{
 		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
-		if (!scene_removable (at)) {
-			return false;
-		}
-		std::shared_ptr<RouteList const> rl = routes.reader ();
-		for (auto const & r : *rl) {
-			std::shared_ptr<TriggerBox> tb = r->triggerbox ();
-			if (tb) {
-				tb->remove_slot (at);
-			}
+		for (size_t i = 0; i < boxes.size (); ++i) {
+			boxes[i]->commit_shift (plans[i]);
 		}
 		--_scene_count;
 		int32_t const c = _active_cue.load ();
@@ -1861,29 +1878,19 @@ Session::shift_cue_markers (uint32_t at, int delta)
 void
 Session::sync_scenes ()
 {
-	/* the box with most slots sets the count, so no clip is ever dropped;
-	 * the others get empty slots. Sessions from before Spite had scenes
-	 * have 16 slots, and keep them.
+	/* the box whose last stored slot is furthest sets the count, so no
+	 * clip is ever dropped. Sessions from before Spite had scenes have 16
+	 * slots, and keep them. Empty slots need nothing stored.
 	 */
 	uint32_t n = std::max<uint32_t> (_scene_count, 1);
 	std::shared_ptr<RouteList const> rl = routes.reader ();
 	for (auto const & r : *rl) {
 		std::shared_ptr<TriggerBox> tb = r->triggerbox ();
 		if (tb) {
-			n = std::max (n, tb->n_triggers ());
+			n = std::max (n, tb->last_scene_plus_one ());
 		}
 	}
 	n = std::min<uint32_t> (n, TriggerBox::max_triggers_per_box);
-
-	{
-		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
-		for (auto const & r : *rl) {
-			std::shared_ptr<TriggerBox> tb = r->triggerbox ();
-			if (tb && tb->n_triggers () < n) {
-				tb->add_slots_to (n);
-			}
-		}
-	}
 
 	if (n != _scene_count) {
 		_scene_count = n;

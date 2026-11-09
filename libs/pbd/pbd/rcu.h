@@ -271,6 +271,22 @@ public:
 		_dead_wood.clear ();
 	}
 
+	/* Spite: free the old values nobody holds any more (write_copy () does
+	 * this too), for when no write follows for a while. Unlike flush (),
+	 * safe while readers hold old values.
+	 */
+	void collect ()
+	{
+		std::lock_guard<std::mutex> lm (_lock);
+		for (typename std::list<std::shared_ptr<T> >::iterator i = _dead_wood.begin (); i != _dead_wood.end ();) {
+			if (1 == (*i).use_count ()) {
+				i = _dead_wood.erase (i);
+			} else {
+				++i;
+			}
+		}
+	}
+
 private:
 	std::mutex                             _lock;
 	typename RCUManager<T>::PtrToSharedPtr _current_write_old;

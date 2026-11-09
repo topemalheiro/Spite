@@ -31,6 +31,7 @@
 #include "pbd/pcg_rand.h"
 #include "pbd/pool.h"
 #include "pbd/properties.h"
+#include "pbd/rcu.h"
 #include "pbd/ringbuffer.h"
 #include "pbd/rwlock.h"
 #include "pbd/stateful.h"
@@ -337,8 +338,6 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	 * on a trigger it is swapping in).
 	 */
 	void set_index (uint32_t n) { _index = n; }
-	/* Spite: a region is being loaded into this slot */
-	bool has_pending () const { return _pending.load () != 0; }
 	/* Spite: UI changes not yet applied by update_properties () */
 	bool ui_state_pending () const { return ui_state.generation.load () != last_property_generation.load (); }
 	/* Spite: follow-action targets name slots: move the ones at or after
@@ -425,14 +424,9 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 
 	void set_velocity_gain (gain_t g) {_pending_velocity_gain=g;}
 
-	void set_pending (Trigger*);
-	Trigger* swap_pending (Trigger*);
-
 	void update_properties ();
 	/* Spite: the settings a slot keeps without a clip are the same */
-	bool same_settings (Trigger const&) const;
-
-	static Trigger * const MagicClearPointerValue;
+	bool same_settings (Trigger const&, bool ignore_cue_isolated = false) const;
 
 	virtual SegmentDescriptor get_segment_descriptor () const = 0;
 
@@ -505,7 +499,6 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	samplepos_t                expected_end_sample;
 	Temporal::BBT_Offset      _start_quantization;
 	Temporal::BBT_Offset      _nxt_quantization;
-	std::atomic<Trigger*>     _pending;
 	std::atomic<unsigned int>  last_property_generation;
 	PBD::ScopedConnection      region_connection;
 
@@ -792,7 +785,7 @@ class LIBARDOUR_API TriggerBoxThread
 
 	static void init_request_pool() { Request::init_pool(); }
 
-	void set_region (TriggerBox&, uint32_t slot, std::shared_ptr<Region>);
+	void set_region (TriggerBox&, uint32_t slot, std::shared_ptr<Region>, uint32_t load_id);
 	void request_delete_trigger (Trigger* t);
 	void request_build_source (std::shared_ptr<Trigger> t, Temporal::timecnt_t const & duration, Temporal::timepos_t const &, samplecnt_t pre_capture);
 
@@ -819,6 +812,7 @@ class LIBARDOUR_API TriggerBoxThread
 		/* for set region (Spite: a box that went away meanwhile is skipped) */
 		std::weak_ptr<TriggerBox> box;
 		uint32_t slot;
+		uint32_t load_id; /* Spite: see TriggerBox::request_load () */
 		std::shared_ptr<Region> region;
 		/* for DeleteTrigger */
 		Trigger* trigger;
@@ -862,9 +856,9 @@ struct SlotArmInfo {
 	SlotArmInfo ();
 	~SlotArmInfo();
 
-	void reset (Trigger&);
+	void reset (TriggerPtr);
 
-	Trigger* slot;
+	TriggerPtr slot; /* Spite: a TriggerPtr: an armed empty slot may have nothing else holding it */
 	Temporal::Beats start_beats;
 	Temporal::Beats pre_start_beats;
 	Temporal::Beats count_in_beats;
@@ -877,6 +871,28 @@ struct SlotArmInfo {
 	RTMidiBufferBeats* midi_buf;
 	AudioTrigger::AudioData audio_buf;
 	RubberBand::RubberBandStretcher* stretcher;
+};
+
+/* Spite: a box stores only the slots that hold something: a clip, a load in
+ * progress, an empty slot with settings of its own (a Trigger without a
+ * region), or just "no stop button" (unlimited-scenes plan, step 4). A
+ * scene with no entry is an empty slot with the box's defaults.
+ */
+struct LIBARDOUR_API SlotEntry {
+	enum : uint16_t { NoStop = 0x1, Loading = 0x2 };
+	uint32_t   scene = 0;
+	uint16_t   flags = 0;
+	uint32_t   load_id = 0;  /* while Loading: the worker finds its entry by this */
+	TriggerPtr trigger;      /* null for flag-only and Loading entries */
+};
+
+struct LIBARDOUR_API SlotMap {
+	std::vector<SlotEntry> entries; /* sorted by scene, at most one per scene; immutable once published */
+	uint64_t               generation = 0;
+
+	size_t lower_bound (uint32_t scene) const;
+	SlotEntry const* find (uint32_t scene) const;
+	SlotEntry* find (uint32_t scene);
 };
 
 class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_from_this<TriggerBox>
@@ -910,7 +926,7 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	static PBD::Signal<void(Trigger const *)> RegionCaptured;
 	static PBD::Signal<void(Temporal::Beats)> CountIn;
 
-	void arm_from_another_thread (Trigger& slot, samplepos_t, uint32_t chans, Temporal::BBT_Offset const &);
+	void arm_from_another_thread (TriggerPtr slot, samplepos_t, uint32_t chans, Temporal::BBT_Offset const &);
 	void setup_arm_info_bounds (SlotArmInfo& ai, samplepos_t, Trigger& slot, Temporal::BBT_Offset const & duration);
 	void disarm();
 	void disarm_all();
@@ -964,7 +980,6 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	void bang_trigger_at (Triggers::size_type row, float velocity = 1.0f);
 	void unbang_trigger_at (Triggers::size_type row);
 
-	void add_trigger (TriggerPtr);
 
 	/* Spite: scenes. All of these need the process lock held, as the RT
 	 * thread reads the slots without a lock.
@@ -978,19 +993,14 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	 */
 	void queue_edit_swap_check () { _edit_swaps_queued.store (true); }
 	void queue_state_request_check () { _state_requests_queued.store (true); }
-	void queue_slot_swap_check () { _slot_swaps_queued.store (true); }
 	void queue_property_update () { _property_updates_queued.store (true); }
 	void queue_all_slot_checks ();
 
-	void insert_slot (uint32_t at);
 	bool slot_removable (uint32_t at) const;
-	void remove_slot (uint32_t at);
-	void add_slots_to (uint32_t n);
 
 	void fast_forward (CueEvents const &, samplepos_t transport_position);
 	bool fast_forwarding() const { return _fast_forwarding; }
 
-	void set_pending (uint32_t slot, Trigger*);
 
 	XMLNode& get_state () const;
 	int set_state (const XMLNode&, int version);
@@ -1025,7 +1035,7 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 
 	void queue_explict (uint32_t);
 
-	void set_region (uint32_t slot, std::shared_ptr<Region> region);
+	void set_region (uint32_t slot, std::shared_ptr<Region> region, uint32_t load_id); /* the worker */
 
 	void non_realtime_transport_stop (samplepos_t now, bool flush);
 	void non_realtime_locate (samplepos_t now);
@@ -1108,39 +1118,70 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 
 	DataType _data_type;
 	int32_t _order;
-	mutable PBD::RWLock trigger_lock; /* protects all_triggers */
-	Triggers all_triggers;
-
-	/* Spite: the slots' storage (all_triggers) is reached only through
-	 * these (unlimited-scenes plan, step 3), so that it can become sparse:
-	 * then only slots that hold something are stored, and the audio thread
-	 * reads a snapshot. A scene with nothing stored is an empty slot.
+	/* Spite: the slots (see SlotEntry). Writers publish a new map; the audio
+	 * thread reads the snapshot it takes at the top of run (), other
+	 * threads take theirs with _slots.reader (). Reached only through the
+	 * accessors and writers below (unlimited-scenes plan, steps 3 and 4).
 	 */
+	SerializedRCUManager<SlotMap> _slots;
+	std::atomic<uint64_t>         _slots_gen {0};
+	std::shared_ptr<SlotMap const> _rt_slots;  /* the audio thread's */
+	std::atomic<uint32_t>         _next_load_id {1};
+
 	static TriggerPtr const _no_trigger;
-	/* the audio thread (and code that ran without a lock so far) */
-	TriggerPtr const& slot_rt (uint32_t scene) const { return scene < all_triggers.size () ? all_triggers[scene] : _no_trigger; }
-	uint32_t scene_count_rt () const { return all_triggers.size (); }
-	template<typename F> void for_each_stored_rt (F f) const {
-		for (uint32_t n = 0; n < all_triggers.size (); ++n) { f (n, all_triggers[n]); }
+	/* the audio thread */
+	TriggerPtr const& slot_rt (uint32_t scene) const {
+		SlotEntry const* e = _rt_slots->find (scene);
+		return e ? e->trigger : _no_trigger;
 	}
-	/* other threads: with the storage's reader lock */
-	template<typename F> void for_each_stored (F f) const {
-		PBD::RWLock::ReaderLock lm (trigger_lock);
-		for_each_stored_rt (f);
+	uint32_t scene_count_rt () const;
+	/* stored triggers, and the playing one if it is no longer stored (a
+	 * clip replaced or cleared while it plays: "detached")
+	 */
+	template<typename F> void for_each_in (SlotMap const& m, TriggerPtr const& playing, F f) const {
+		for (auto const& e : m.entries) {
+			if (e.trigger) { f (e.scene, e.trigger); }
+		}
+		if (playing) {
+			SlotEntry const* e = m.find (playing->index ());
+			if (!e || e->trigger != playing) { f (playing->index (), playing); }
+		}
 	}
+	template<typename F> void for_each_stored_rt (F f) const { for_each_in (*_rt_slots, _currently_playing, f); }
+	/* other threads */
+	template<typename F> void for_each_stored (F f) const { for_each_in (*_slots.reader (), _currently_playing, f); }
 	TriggerPtr stored (uint32_t scene) const {
-		PBD::RWLock::ReaderLock lm (trigger_lock);
-		return slot_rt (scene);
+		std::shared_ptr<SlotMap const> m (_slots.reader ());
+		SlotEntry const* e = m->find (scene);
+		return e ? e->trigger : TriggerPtr ();
 	}
 	/* writers */
-	void append_slot (TriggerPtr);                      /* constructor, set_state () */
-	void replace_slot_rt (uint32_t scene, TriggerPtr);  /* the audio thread swapping a new trigger in */
-
+	void publish (std::shared_ptr<SlotMap>);   /* _slots.update (), then wake the audio thread's scans */
+	void install (uint32_t load_id, Trigger*); /* the worker: a loaded clip into the slot waiting for it */
+	TriggerPtr new_trigger (uint32_t scene) const; /* an empty Trigger with the box's defaults */
+	void prepare_shift_locked (SlotMap&, uint32_t at, int delta);
+public:
+	/* Spite: Insert/Remove Scene in two steps: prepare_shift () before the
+	 * process lock (copies and shifts the map, keeping this box's writer
+	 * lock), commit_shift () with it held. See Session::insert_scene ().
+	 */
+	struct ShiftPlan {
+		std::shared_ptr<SlotMap> map;
+		uint32_t at = 0;
+		int delta = 0;
+	};
+	ShiftPlan prepare_shift (uint32_t at, int delta);
+	void commit_shift (ShiftPlan&);
+	uint32_t last_scene_plus_one () const;
+	/* Spite: drop empty slots that differ in nothing from the defaults (GUI idle, after loading) */
+	void reap ();
+	/* Spite: free maps nobody reads any more */
+	void collect ();
+private:
 
 	/* Spite: see queue_edit_swap_check (). True to start: look once. */
 	std::atomic<bool> _edit_swaps_queued {true};
 	std::atomic<bool> _state_requests_queued {true};
-	std::atomic<bool> _slot_swaps_queued {true};
 	std::atomic<bool> _property_updates_queued {true};
 
 	TriggerPtr _defaults; /* Spite: see defaults () */
@@ -1167,10 +1208,9 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	void drop_triggers ();
 	void process_ui_trigger_requests ();
 	void process_midi_trigger_requests (BufferSet&);
-	int determine_next_trigger (uint32_t n);
+	int determine_next_trigger (SlotMap const&, uint32_t n);
 	void stop_all ();
 
-	void maybe_swap_pending (uint32_t, BufferSet&, samplepos_t);
 
 	void parameter_changed (std::string const &);
 	static void static_parameter_changed (std::string const &);
