@@ -195,6 +195,7 @@ private:
 	void update_cue_rows ();
 	void trigger_swapped (uint32_t slot);
 	void rec_enable_changed ();
+	void defaults_changed ();
 	void owner_prop_change (PBD::PropertyChange const&);
 	void ui_parameter_changed (std::string const&);
 	int32_t cue_row () const;

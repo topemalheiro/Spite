@@ -126,7 +126,6 @@ SceneActions::insert_scene_at (uint32_t at)
 	if (s->insert_scene (at)) {
 		s->add_command (new SceneCommand (*s, SceneCommand::Insert, at));
 		s->commit_reversible_command ();
-		scenes_shifted (at, 1); /* TODO: from Session::ScenesShifted (step 2), for undo and Lua too */
 		/* like Live, the new scene is the selected one: Ctrl+I again adds below it */
 		_selected_scene = at;
 	} else {
@@ -153,7 +152,6 @@ SceneActions::delete_scene (uint32_t at)
 	if (s->remove_scene (at)) {
 		s->add_command (new SceneCommand (*s, SceneCommand::Remove, at));
 		s->commit_reversible_command ();
-		scenes_shifted (at, -1); /* TODO: from Session::ScenesShifted (step 2) */
 		if (_selected_scene >= (int32_t) s->scene_count ()) {
 			_selected_scene = (int32_t) s->scene_count () - 1;
 		}

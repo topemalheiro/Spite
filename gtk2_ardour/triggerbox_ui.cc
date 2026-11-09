@@ -355,7 +355,12 @@ TriggerEntry::draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float sz,
 			break;
 
 		case Disabled:
-			/* not recording and no content in this slot, it is only a Stop button */
+			/* not recording and no content in this slot, it is only a Stop
+			 * button, or nothing if it has none (Spite: Live's "Remove Stop
+			 * Button") */
+			if (!tref.box ()->has_stop (tref.slot ())) {
+				return;
+			}
 			context->move_to (margin, margin);
 			context->rel_line_to (size, 0);
 			context->rel_line_to (0, size);
@@ -518,7 +523,7 @@ TriggerEntry::render (ArdourCanvas::Rect const& area, Cairo::RefPtr<Cairo::Conte
 		return;
 	}
 
-	if (v->cue_isolated ()) {
+	if (trigger_if_any () && !tref.box ()->slot_empty (tref.slot ()) && v->cue_isolated ()) { /* Spite: an empty slot has no clip to isolate (only its stop button to lose) */
 		/* left shadow */
 		context->save ();
 		context->translate (self.x0, self.y0 - 0.5);
@@ -1029,6 +1034,8 @@ TriggerBoxUI::TriggerBoxUI (ArdourCanvas::Item* parent, TriggerStrip& s, Trigger
 	_triggerbox.PropertyChanged.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::box_property_changed, this, _1), gui_context ());
 	_triggerbox.TriggerSwapped.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::trigger_swapped, this, _1), gui_context ());
 	_triggerbox.RecEnableChanged.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::rec_enable_changed, this), gui_context ());
+	/* Spite: empty slots show the box's defaults */
+	_triggerbox.DefaultsChanged.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::defaults_changed, this), gui_context ());
 
 	if (Stripable* owner = dynamic_cast<Stripable*> (_triggerbox.owner ())) {
 		owner->presentation_info ().Change.connect (_box_connections, invalidator (*this), std::bind (&TriggerBoxUI::owner_prop_change, this, _1), gui_context ());
@@ -1146,8 +1153,19 @@ TriggerBoxUI::trigger_swapped (uint32_t n)
 		return; /* off screen: its row is pointed at it when scrolled in */
 	}
 	e->trigger_swapped ();
+	e->rec_enable_change (); /* it may have been armed as it got its Trigger */
 	TriggerPtr const t (_triggerbox.trigger (n));
 	_shown[n % _pool_n] = t ? t.get () : 0;
+}
+
+void
+TriggerBoxUI::defaults_changed ()
+{
+	for (size_t k = 0; k < _pool_n; ++k) {
+		if (_slot_of[k] >= 0 && !_slots[k]->trigger_if_any ()) {
+			_slots[k]->on_trigger_changed (TriggerBox::all_trigger_props ());
+		}
+	}
 }
 
 void

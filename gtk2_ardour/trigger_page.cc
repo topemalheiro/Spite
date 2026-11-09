@@ -471,6 +471,9 @@ TriggerPage::set_session (Session* s)
 	_session->StateSaved.connect (_session_connections, invalidator (*this), std::bind (&TriggerPage::update_title, this), gui_context ());
 
 	_session->RouteAdded.connect (_session_connections, invalidator (*this), std::bind (&TriggerPage::add_routes, this, _1), gui_context ());
+	/* Spite: the selection and the selected scene move with their scenes, for
+	 * Insert/Delete Scene, undo, Lua and surfaces alike */
+	_session->ScenesShifted.connect (_session_connections, invalidator (*this), std::bind (&SceneActions::scenes_shifted, _1, _2), gui_context ());
 	TriggerStrip::CatchDeletion.connect (*this, invalidator (*this), std::bind (&TriggerPage::remove_route, this, _1), gui_context ());
 
 	_session->config.ParameterChanged.connect (_session_connections, invalidator (*this), std::bind (&TriggerPage::parameter_changed, this, _1), gui_context ());
@@ -590,9 +593,13 @@ TriggerPage::clear_selected_slot ()
 	if (ts.empty ()) {
 		return;
 	}
-	TriggerPtr trigger = ts.front ().trigger ();
-	if (trigger) {
-		trigger->set_region (std::shared_ptr<Region>());
+	if (std::shared_ptr<TriggerBox> box = ts.front ().box ()) {
+		uint32_t const slot = ts.front ().slot ();
+		bool const     had  = (bool) box->trigger (slot);
+		box->clear_slot (slot);
+		if ((bool) box->trigger (slot) != had) {
+			box->TriggerSwapped (slot); /* EMIT SIGNAL: the rows follow the slot */
+		}
 	}
 }
 

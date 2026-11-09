@@ -192,6 +192,9 @@ MidiViewBackground::setup_note_lines()
 	double h = note_height();
 	double y;
 	std::shared_ptr<ARDOUR::MidiTrack> mt (midi_track());
+	if (!mt) {
+		return; /* Spite: a clip editor without a track yet */
+	}
 	bool show_key = mt->key_enforcement_policy() & ARDOUR::ShowKey;
 	ARDOUR::MusicalKey const * key = mt->key();
 

@@ -85,6 +85,9 @@ public:
 	ARDOUR::TriggerPtr                     trigger_if_any () const;
 	std::shared_ptr<ARDOUR::Trigger const> view () const;
 	ARDOUR::TriggerPtr                     writable () const;
+	/* the slot got a Trigger or lost it (had: whether it had one before):
+	 * tell the rows and panels showing it, as a newly loaded clip does */
+	void slot_changed (bool had) const;
 	ARDOUR::TriggerBox&                    triggerbox () const { return *tref.box (); }
 
 	void choose_color (Gtk::Window*);

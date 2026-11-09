@@ -142,7 +142,9 @@ void
 TriggerUI::trigger_swapped ()
 {
 	connect_to_trigger ();
-	trigger_changed (Properties::name);
+	/* Spite: a slot can also get its first Trigger, or lose it (empty slots
+	 * have none): everything about it may have changed */
+	trigger_changed (TriggerBox::all_trigger_props ());
 }
 
 void
@@ -153,6 +155,9 @@ TriggerUI::connect_to_trigger ()
 	TriggerPtr t (trigger_if_any ()); /* an empty slot may have none */
 	if (t) {
 		t->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
+	} else if (_box_signals && tref.box ()) {
+		/* an empty slot shows the box's defaults (TriggerBoxUI relays this for its rows) */
+		tref.box ()->DefaultsChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, TriggerBox::all_trigger_props ()), gui_context ());
 	}
 	if (_box_signals) {
 		tref.box()->PropertyChanged.connect (trigger_connections, invalidator (*this), std::bind (&TriggerUI::trigger_changed, this, _1), gui_context ());
@@ -356,6 +361,7 @@ TriggerUI::launch_context_menu ()
 	delete _launch_context_menu;
 
 	std::shared_ptr<Trigger const> const v (view ()); /* Spite: an empty slot shows the defaults */
+	bool const empty_no_stop = tref.box () && tref.box ()->slot_empty (tref.slot ()) && !tref.box ()->has_stop (tref.slot ());
 
 	_launch_context_menu   = new Menu;
 	MenuList& items = _launch_context_menu->items ();
@@ -459,7 +465,7 @@ TriggerUI::launch_context_menu ()
 	items.push_back (MenuElem (_("Quantization..."), *quant_menu));
 
 	items.push_back (CheckMenuElem (_("Cue Isolate"), sigc::mem_fun (*this, &TriggerUI::toggle_trigger_isolated)));
-	if (v && v->cue_isolated ()) {
+	if (empty_no_stop || (v && trigger_if_any () && v->cue_isolated ())) {
 		PBD::Unwinder<bool> uw (_ignore_menu_action, true);
 		dynamic_cast<Gtk::CheckMenuItem*> (&items.back ())->set_active (true);
 	}
@@ -535,16 +541,27 @@ TriggerUI::toggle_trigger_isolated ()
 		return;
 	}
 
-	if (TriggerPtr t = writable ()) {
-		t->set_cue_isolated (!t->cue_isolated ()); /* TODO (step 2): set_has_stop () for an empty slot */
+	std::shared_ptr<TriggerBox> box (tref.box ());
+	if (!box) {
+		return;
+	}
+	if (box->slot_empty (tref.slot ())) {
+		/* an empty slot's "cue isolate" is whether it has a stop button */
+		bool const had = (bool) tref.trigger ();
+		box->set_has_stop (tref.slot (), !box->has_stop (tref.slot ()));
+		slot_changed (had);
+	} else if (TriggerPtr t = trigger_if_any ()) {
+		t->set_cue_isolated (!t->cue_isolated ());
 	}
 }
 
 void
 TriggerUI::clear_trigger ()
 {
-	if (TriggerPtr t = trigger_if_any ()) { /* TODO (step 2): the box's clear_slot () */
-		t->set_region (std::shared_ptr<Region>());
+	if (std::shared_ptr<TriggerBox> box = tref.box ()) {
+		bool const had = (bool) tref.trigger ();
+		box->clear_slot (tref.slot ());
+		slot_changed (had);
 	}
 }
 
@@ -716,15 +733,39 @@ TriggerUI::trigger_if_any () const
 std::shared_ptr<Trigger const>
 TriggerUI::view () const
 {
-	/* TODO (step 2): the box's defaults () for an empty slot */
-	return tref.trigger ();
+	if (TriggerPtr t = tref.trigger ()) {
+		return t;
+	}
+	/* an empty slot: what a new clip there would get */
+	std::shared_ptr<TriggerBox> box (tref.box ());
+	return box ? box->defaults () : std::shared_ptr<Trigger const> ();
 }
 
 TriggerPtr
 TriggerUI::writable () const
 {
-	/* TODO (step 2): the box's materialize (slot) for an empty slot */
-	return tref.trigger ();
+	std::shared_ptr<TriggerBox> box (tref.box ());
+	if (!box) {
+		return TriggerPtr ();
+	}
+	bool const had = (bool) tref.trigger ();
+	TriggerPtr t (box->materialize (tref.slot ()));
+	if (t && !had) {
+		/* the slot just got its Trigger: follow it from now on */
+		const_cast<TriggerUI*> (this)->connect_to_trigger ();
+		slot_changed (had);
+	}
+	return t;
+}
+
+void
+TriggerUI::slot_changed (bool had) const
+{
+	/* TODO: the engine's materialize () and clear_slot () could emit this */
+	std::shared_ptr<TriggerBox> box (tref.box ());
+	if (box && (bool) tref.trigger () != had) {
+		box->TriggerSwapped (tref.slot ()); /* EMIT SIGNAL */
+	}
 }
 
 void

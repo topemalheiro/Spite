@@ -565,9 +565,7 @@ SlotPropertyTable::isolate_button_event (GdkEvent* ev)
 
 	switch (ev->type) {
 	case GDK_BUTTON_PRESS:
-		if (TriggerPtr t = writable ()) { /* TODO (step 2): set_has_stop () for an empty slot */
-			t->set_cue_isolated (!t->cue_isolated());
-		}
+		toggle_trigger_isolated (); /* an empty slot's is its stop button */
 		return true;
 
 	default:
@@ -706,7 +704,10 @@ SlotPropertyTable::on_trigger_changed (PropertyChange const& pc)
 	}
 
 	if (pc.contains (Properties::cue_isolated)) {
-		_isolate_button.set_active_state (trigr->cue_isolated() ? Gtkmm2ext::ExplicitActive : Gtkmm2ext::Off);
+		/* Spite: an empty slot's "isolate" is having no stop button */
+		std::shared_ptr<TriggerBox> box (tref.box ());
+		bool const iso = (box && box->slot_empty (tref.slot ())) ? !box->has_stop (tref.slot ()) : trigr->cue_isolated();
+		_isolate_button.set_active_state (iso ? Gtkmm2ext::ExplicitActive : Gtkmm2ext::Off);
 	}
 
 	if (pc.contains (Properties::allow_patch_changes)) {

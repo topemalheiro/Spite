@@ -638,7 +638,13 @@ CueEditor::rec_button_press (GdkEventButton* ev)
 	TriggerPtr trigger (ref.trigger());
 
 	if (!trigger) {
-		return true;
+		/* Spite: an empty slot gets its Trigger to record into */
+		std::shared_ptr<TriggerBox> box (ref.box ());
+		if (!box || !(trigger = box->materialize (ref.slot ()))) {
+			return true;
+		}
+		TriggerReference r (ref);
+		set_trigger (r); /* follow the new Trigger */
 	}
 
 	if (trigger->armed()) {
@@ -1367,6 +1373,16 @@ CueEditor::set_trigger (TriggerReference& tref)
 	TriggerPtr trigger (ref.trigger());
 
 	if (!trigger) {
+		/* Spite: an empty slot has no Trigger (unlimited scenes): the editor
+		 * still belongs to its track, and can record into it */
+		if (std::shared_ptr<TriggerBox> box = ref.box ()) {
+			if (Stripable* st = dynamic_cast<Stripable*> (box->owner ())) {
+				set_track (std::dynamic_pointer_cast<Track> (st->shared_from_this ()));
+			}
+			box->RecEnableChanged.connect (trigger_connections, invalidator (*this), std::bind (&CueEditor::rec_enable_change, this), gui_context());
+			rec_box.show ();
+			rec_enable_button.set_sensitive (true);
+		}
 		set_region (nullptr);
 		_update_connection = Timers::super_rapid_connect (sigc::mem_fun (*this, &CueEditor::maybe_update));
 		play_button.set_sensitive (false);
