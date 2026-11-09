@@ -153,6 +153,18 @@ TriggerEntry::repoint (TriggerReference tr)
 	rec_enable_change ();
 }
 
+/* Spite: Trigger::will_follow () as it will be: it reads the follow actions the
+ * audio thread has applied, a cycle or more after a change, and the row is
+ * redrawn when the change is made. The getters read the requested ones. */
+static bool
+shows_follow_icon (Trigger const& t)
+{
+	FollowAction const f0 (t.follow_action0 ());
+	FollowAction const f1 (t.follow_action1 ());
+	bool const not_following = (f0.type == FollowAction::None && t.follow_action_probability () == 0) || (f0.type == FollowAction::None && f1.type == FollowAction::None);
+	return !not_following;
+}
+
 std::shared_ptr<Trigger const>
 TriggerEntry::play_view () const
 {
@@ -299,8 +311,21 @@ TriggerEntry::draw_follow_icon (Cairo::RefPtr<Cairo::Context> context, FollowAct
 				layout->set_text (cue_marker_name (cue_idx));
 				int tw, th;
 				layout->get_pixel_size (tw, th);
-				context->move_to (size / 2, size / 2);
-				context->rel_move_to (-tw / 2, -th / 2);
+				double const pad = 2 * scale;
+				if (tw > size - 2 * pad) {
+					/* Spite: scene numbers have any number of digits: a wide one
+					 * ends at the row's right edge and covers the end of the
+					 * name, on the follow button's own color */
+					double const x = size - tw - pad;
+					context->rectangle (x - pad, 0, tw + 2 * pad, size);
+					set_source_rgba (context, follow_button->fill_color ());
+					context->fill ();
+					set_source_rgba (context, fg_color);
+					context->move_to (x, (size - th) / 2);
+				} else {
+					context->move_to (size / 2, size / 2);
+					context->rel_move_to (-tw / 2, -th / 2);
+				}
 				layout->show_in_cairo_context (context);
 			} else { // Multi-Jump: draw a star-like icon
 				context->set_line_width (1.5 * scale);
@@ -563,7 +588,7 @@ TriggerEntry::render (ArdourCanvas::Rect const& area, Cairo::RefPtr<Cairo::Conte
 	}
 
 	/* follow-action icon */
-	if (v->playable () && v->will_follow ()) {
+	if (v->playable () && shows_follow_icon (*v)) {
 		context->save ();
 		context->translate (self.x0, self.y0 - 0.5);
 		context->translate (width - height, 0); // right side of the widget

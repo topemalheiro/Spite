@@ -268,6 +268,17 @@ spite_dsp_probe_start ()
 		static PBD::ScopedConnection xrun_connection;
 		AudioEngine::instance ()->Xrun.connect_same_thread (xrun_connection, [] () { ++spite_engine_xruns; });
 		Glib::signal_timeout ().connect (sigc::ptr_fun (&spite_dsp_probe), 50);
+		/* and the GUI: the main loop busy for more than 50 ms is a dropped
+		 * frame or more (a scroll that stutters) */
+		Glib::signal_timeout ().connect ([] () {
+			static gint64 last = 0;
+			gint64 const  now  = g_get_monotonic_time ();
+			if (last && now - last > 60000) {
+				spite_cue_log (string_compose ("gui: the main loop was busy %1 ms", (now - last - 10000) / 1000));
+			}
+			last = now;
+			return true;
+		}, 10);
 	}
 }
 

@@ -1037,6 +1037,8 @@ TriggerPage::show_clip_view ()
 void
 TriggerPage::add_routes (RouteList& rl)
 {
+	gint64 const t0 = g_get_monotonic_time (); /* Spite: logged to cue-layout.log */
+	size_t const n0 = _strips.size ();
 	rl.sort (Stripable::Sorter ());
 	for (RouteList::iterator r = rl.begin (); r != rl.end (); ++r) {
 		/* we're only interested in Tracks */
@@ -1066,6 +1068,17 @@ TriggerPage::add_routes (RouteList& rl)
 		ts->NameClicked.connect (sigc::bind (sigc::mem_fun (*this, &TriggerPage::strip_name_clicked), ts)); /* Spite: Device view */
 	}
 	redisplay_track_list ();
+
+	/* Spite: how long the Cue page takes to build its strips, and to lay them
+	 * out and draw them (their grids make their rows then) */
+	size_t const   added  = _strips.size () - n0;
+	uint32_t const scenes = _session ? _session->scene_count () : 0;
+	gint64 const   t1     = g_get_monotonic_time ();
+	spite_cue_log (string_compose ("cue page: %1 strips made in %2 ms (%3 scenes)", added, (t1 - t0) / 1000, scenes));
+	Glib::signal_idle ().connect ([t0] () {
+		spite_cue_log (string_compose ("cue page: laid out and drawn %1 ms after the strips were started", (g_get_monotonic_time () - t0) / 1000));
+		return false;
+	}, Glib::PRIORITY_LOW);
 }
 
 void
