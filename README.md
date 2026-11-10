@@ -156,7 +156,9 @@ The build puts the plugdata app and its plugins in `plugdata/Plugins`. On Linux,
 
 ## Credit and licence
 
-Spite is built on Ardour, created by Paul Davis and the Ardour community, and it keeps Ardour's full history and copyright notices. Ardour is licensed under the **GNU General Public License, version 2 or later** (see [LICENSE](LICENSE)), and so is Spite. Ardour's note on how its licence relates to plugins is kept in [PLUGIN-CLARIFICATION.txt](PLUGIN-CLARIFICATION.txt). All changes here are released under the same licence, and the source stays open.
+**Spite is licensed under the GNU General Public License, version 3** (see [LICENSE](LICENSE)). Until 10 November 2026 it used Ardour's licence, the GNU General Public License, version 2 or later. It changed because Spite includes plugdata (Copyright Timothy Schoen and the plugdata contributors), which is licensed under version 3.
+
+Spite is built on Ardour, created by Paul Davis and the Ardour community, and it keeps Ardour's full history and copyright notices. Ardour's own files keep their "version 2 or later" notices, which allow Spite as a whole to be distributed under version 3. Ardour's note on how its licence relates to plugins is kept in [PLUGIN-CLARIFICATION.txt](PLUGIN-CLARIFICATION.txt). All changes here are released under version 3, and the source stays open.
 
 Ardour's own documentation and build instructions are at <https://ardour.org/development.html>. The original `README` is kept as it was.
 
