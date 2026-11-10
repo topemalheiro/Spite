@@ -154,6 +154,7 @@ waf3-*
 /local
 
 # personal notes, kept out of the repo
+/CLAUDE.md
 /Task Ideas.md
 /Pitch/
 /PaidProjects/
