@@ -34,9 +34,9 @@ subpatches that open in presentation). --objects old writes stock plugdata
 objects and stand-in subpatches instead, for PgD4S builds older than those.
 
 --install converts into ~/.local/share/spite9/m4l/<name>/ and writes one LV2
-preset per converted device into ~/.lv2/spite-m4l.lv2/, for plugdata-fx
-(audio effects) or plugdata (instruments and MIDI effects). In Spite, add
-plugdata-fx or plugdata to a track and pick "M4L: <name>" from its presets.
+preset per converted device into ~/.lv2/spite-m4l.lv2/, for PgD4S-fx
+(audio effects) or PgD4S (instruments and MIDI effects). In Spite's plugin
+browser, double-click or drag the preset "M4L: <name>" onto a track.
 
 The device's frozen files (abstractions, JavaScript, images) are unpacked next
 to the patch, so abstractions convert too. Objects plugdata doesn't have stay
