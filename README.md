@@ -33,11 +33,11 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 - **Device view (in progress).** The selected track's devices as a chain across the bottom panel, like Live's, with Shift+Tab switching between the clip and its devices. Devices become modules that collapse and enlarge.
 - **Custom views.** A Views menu to save and edit views (which panels, sidebars, strips and device layout each page shows) and to switch or cycle between them from a key or a control surface.
 - **As many scenes as a set needs.** The letters are gone. Next, a set stops being capped at 16 scenes.
-- **More for the MCR.** Cables within a track, loops through a cable that waits one buffer, and cables to device parameters for modulation.
+- **More for the MCR. (Modular Channels Rack window/view)** Cables within a track, loops through a cable that waits one buffer, and cables to device parameters for modulation.
 
 **After that:**
 
-- **An automation view tied to step sequencers.**
+- **An automation/MIDI editing window/view tied to step sequencers.**
 - **Presets within reach.** Preset slots beside each device that a control-surface button can fire, and a coloured box showing what a control surface has mapped.
 - **Macro knobs.** One knob driving many parameters, each with its own range and curve.
 - **Knobs that offset automation.** Recorded modulation (generative patches, LFOs and the modulators driving them) plays back from automation lines, and a control surface offsets it live without switching it off.
