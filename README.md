@@ -46,7 +46,10 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 - **Preset morphing.** Mappings and setups saved as presets and morphed between, on XY pads or pads with more corners.
 - **Ready-to-play sets.** Cue page sets with the clips, devices, views and colours already laid out, for different kinds of music.
 
+##Some progress screenshots:
 <img width="871" height="327" alt="image" src="https://github.com/user-attachments/assets/9426b204-b89a-4edb-8d80-2b9f8976eefd" />
+<img width="1088" height="646" alt="image" src="https://github.com/user-attachments/assets/ec7738ea-5995-4d60-acdf-8bf7ed843e15" />
+<img width="465" height="456" alt="image" src="https://github.com/user-attachments/assets/a83c45b0-27f4-4fd9-8b10-34cc8dfbf5d9" />
 
 ## Build and run
 
