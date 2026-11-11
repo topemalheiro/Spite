@@ -963,7 +963,14 @@ recompute_visible_regions_internal (GdkWindowObject *private,
 	  r.height = private->height;
 	  new_clip = gdk_region_rectangle (&r);
 
-	  if (!gdk_window_is_toplevel (private))
+	  /* Spite: a composited window is drawn offscreen, all of it, and its parent
+	   * paints it where it wants: neither the parent's clip nor its siblings clip
+	   * it. Clipped as an onscreen child, it (and its native children) would be
+	   * shaped to the part of it that shows (apply_clip_as_shape), and the X
+	   * server would drop all drawing in the rest of it: a window scrolled partly
+	   * out of view would stop updating there. The X server still clips input to
+	   * its native parent. */
+	  if (!gdk_window_is_toplevel (private) && !private->composited)
 	    {
 	      gdk_region_intersect (new_clip, private->parent->clip_region);
 
@@ -9143,12 +9150,15 @@ gdk_window_set_composited (GdkWindow *window,
 
   _gdk_windowing_window_set_composited (window, composited);
 
+  /* Spite: set before the clips are recomputed, which read it: the parent's
+   * clip leaves a composited child out (so the parent paints over it), and
+   * the child's own clip is all of it */
+  private->composited = composited;
+
   recompute_visible_regions (private, TRUE, FALSE);
 
   if (GDK_WINDOW_IS_MAPPED (window))
     gdk_window_invalidate_in_parent (private);
-
-  private->composited = composited;
 }
 
 
