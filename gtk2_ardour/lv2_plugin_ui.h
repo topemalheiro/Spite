@@ -81,6 +81,9 @@ public:
 	void embed_hide ();
 	void set_face_scale (float scale);
 	bool embed_active () const { return _inst != 0; }
+	/* the embedded GUI's own widget (suil's GtkSocket, the plugin's X window under it),
+	 * while there is one: the MCR composites its window */
+	GtkWidget* embed_socket () const;
 
 private:
 

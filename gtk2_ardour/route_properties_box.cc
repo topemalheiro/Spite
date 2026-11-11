@@ -153,8 +153,11 @@ ProcessorUIFrame::save_state () const
  *
  * A face keeps its last picture (see FaceMemory): it shows that at the face's size until its
  * GUI is ready, so a face never shows up collapsed, and washed out while the device's own
- * window is open, as Live does (one PgD4S editor per plugin, so the face's GUI has to go). */
-class DeviceFace : public Gtk::VBox
+ * window is open, as Live does (one PgD4S editor per plugin, so the face's GUI has to go).
+ *
+ * Its GUI is leased (SpiteFaceHolder): the MCR takes it while it shows, and the face takes
+ * it back when it shows again, both by moving it, so neither makes it again. */
+class DeviceFace : public Gtk::VBox, public SpiteFaceHolder
 {
 public:
 	DeviceFace (std::shared_ptr<Route>, std::shared_ptr<Processor>, std::shared_ptr<PlugInsertBase>, std::shared_ptr<LV2Plugin>, int face_h, int title_h);
@@ -165,6 +168,12 @@ public:
 	void set_face_height (int);
 	/* keep a picture of the face as it is on screen now, if it is */
 	void snapshot ();
+	/* the Device view shows again, or goes (the page changes): GTK then only shows or
+	 * hides the view's window, so the faces in it are told (they stay mapped).
+	 * `turned_to`: the user turned to the view (see SpiteFaceHolder::take_face), else
+	 * another view let faces go (a face that has its GUI keeps it as it is) */
+	void view_shown (bool turned_to = true);
+	void view_hidden ();
 
 	PBD::ID const&             route_id () const { return _route_id; }
 	std::shared_ptr<Processor> processor () const { return _proc; }
@@ -177,6 +186,8 @@ protected:
 	void on_map ();
 	void on_unmap ();
 	void on_unrealize ();
+	LV2PluginUI* lend_face (PBD::ID const&);
+	bool         face_shown (PBD::ID const&) const;
 
 private:
 	bool idle_show_face ();
@@ -193,7 +204,7 @@ private:
 	Gtk::VBox                       _body;
 	Gtk::Image                      _picture;
 	Gtk::Label                      _placeholder;
-	LV2PluginUI*                    _ui;
+	LV2PluginUI*                    _ui; /* made when first needed; 0 while the MCR has it */
 	std::shared_ptr<Processor>      _proc;
 	std::shared_ptr<PlugInsertBase> _pib;
 	std::shared_ptr<LV2Plugin>      _lv2;
@@ -201,6 +212,7 @@ private:
 	int                             _face_h;
 	float                           _scale;
 	bool                            _picture_washed;
+	bool                            _turned_to; /* the face shows because the user turned to the view */
 	sigc::connection                _idle;
 	sigc::connection                _snap_timer;
 	sigc::connection                _showing_connection;
@@ -329,6 +341,136 @@ spite_face_picture (PBD::ID const& id)
 	return remembered_face (id).picture;
 }
 
+void
+spite_keep_face_picture (PBD::ID const& id, Glib::RefPtr<Gdk::Pixbuf> picture)
+{
+	if (!picture) {
+		return;
+	}
+	remembered_face (id).picture = picture;
+
+	std::string const path = face_picture_path (id);
+	if (!path.empty ()) {
+		/* written when Spite is idle: it's for the next time the session is opened */
+		Glib::signal_idle ().connect ([picture, path] () {
+			g_mkdir_with_parents (Glib::path_get_dirname (path).c_str (), 0755);
+			try {
+				picture->save (path, "png");
+			} catch (...) {
+			}
+			return false;
+		}, Glib::PRIORITY_LOW);
+	}
+}
+
+bool
+spite_window_on_screen (Glib::RefPtr<Gdk::Window const> const& win)
+{
+	if (!win || !win->is_viewable ()) {
+		return false;
+	}
+	GdkWindow* const top = gdk_window_get_toplevel (const_cast<GdkWindow*> (win->gobj ()));
+	return top && !(gdk_window_get_state (top) & (GDK_WINDOW_STATE_ICONIFIED | GDK_WINDOW_STATE_WITHDRAWN));
+}
+
+/* Spite: the face lease (see SpiteFaceHolder): who holds each device's GUI, and who held
+ * it last (even once it is freed) */
+static std::map<PBD::ID, SpiteFaceHolder*> face_holders;
+static std::map<PBD::ID, SpiteFaceHolder*> face_last;
+static sigc::connection                    faces_free_idle;
+
+sigc::signal<void> SpiteFaceHolder::FacesFree;
+
+void
+SpiteFaceHolder::faces_free ()
+{
+	if (!faces_free_idle.connected ()) {
+		faces_free_idle = Glib::signal_idle ().connect ([] () {
+			FacesFree (); /* EMIT SIGNAL */
+			return false;
+		});
+	}
+}
+
+SpiteFaceHolder::~SpiteFaceHolder ()
+{
+	for (auto* m : { &face_holders, &face_last }) {
+		for (auto i = m->begin (); i != m->end ();) {
+			if (i->second == this) {
+				i = m->erase (i);
+			} else {
+				++i;
+			}
+		}
+	}
+}
+
+bool
+SpiteFaceHolder::leave_to_last (PBD::ID const& device) const
+{
+	auto const i = face_last.find (device);
+	return face_holders.find (device) == face_holders.end () && i != face_last.end () && i->second != this && i->second->face_shown (device);
+}
+
+SpiteFaceHolder*
+SpiteFaceHolder::holder (PBD::ID const& device)
+{
+	auto const i = face_holders.find (device);
+	return i == face_holders.end () ? 0 : i->second;
+}
+
+void
+SpiteFaceHolder::hold_face (PBD::ID const& device)
+{
+	face_holders[device] = this;
+	face_last[device]    = this;
+}
+
+void
+SpiteFaceHolder::drop_face (PBD::ID const& device)
+{
+	auto const i = face_holders.find (device);
+	if (i != face_holders.end () && i->second == this) {
+		face_holders.erase (i);
+	}
+}
+
+LV2PluginUI*
+SpiteFaceHolder::take_face (PBD::ID const& device, Gtk::Container& to, bool shown_too)
+{
+	auto const i = face_holders.find (device);
+	if (i == face_holders.end () || i->second == this) {
+		return 0;
+	}
+	SpiteFaceHolder* const from = i->second;
+	if (!shown_too && from->face_shown (device)) {
+		return 0; /* on screen there: it keeps it */
+	}
+	face_holders.erase (i);
+
+	LV2PluginUI* const ui = from->lend_face (device);
+	if (!ui) {
+		return 0;
+	}
+	if (ui->embed_active () && ui->get_parent () && ui->get_realized () && to.get_realized ()) {
+		ui->reparent (to);
+		face_holders[device] = this;
+		face_last[device]    = this;
+		return ui;
+	}
+	/* it can't move: freed first (a live X11 GUI must never be re-parented by
+	 * unrealizing it), then the taker makes its own */
+	if (ui->embed_active ()) {
+		spite_cue_log ("face lease: a GUI that couldn't move was freed");
+		ui->embed_hide ();
+	}
+	if (Gtk::Container* p = ui->get_parent ()) {
+		p->remove (*ui);
+	}
+	delete ui;
+	return 0;
+}
+
 /* a face whose device's window is open: Live's washed-out look */
 static Glib::RefPtr<Gdk::Pixbuf>
 washed_out (Glib::RefPtr<Gdk::Pixbuf> const& src)
@@ -353,7 +495,7 @@ washed_out (Glib::RefPtr<Gdk::Pixbuf> const& src)
 DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, std::shared_ptr<PlugInsertBase> pib, std::shared_ptr<LV2Plugin> lv2, int face_h, int title_h)
 	: _enable_btn (ArdourButton::just_led_default_elements)
 	, _name (Spite::device_name (p)) /* a converted Max for Live device's own name */
-	, _ui (new LV2PluginUI (pib, lv2))
+	, _ui (0)
 	, _proc (p)
 	, _pib (pib)
 	, _lv2 (lv2)
@@ -361,9 +503,8 @@ DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, 
 	, _face_h (face_h)
 	, _scale (face_h / 169.f) /* a Max for Live device's face is 169 px tall */
 	, _picture_washed (false)
+	, _turned_to (true)
 {
-	_ui->set_embedded (_scale);
-
 	_title.modify_bg (Gtk::STATE_NORMAL, Gdk::Color ("#464646"));
 	_name.set_alignment (0, 0.5);
 	_name.modify_fg (Gtk::STATE_NORMAL, Gdk::Color ("#e6e6e6"));
@@ -386,7 +527,7 @@ DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, 
 	_placeholder.set_no_show_all ();
 	_picture.set_no_show_all ();
 	_picture.set_alignment (0, 0);
-	_body.pack_start (*_ui, true, true);
+	/* the GUI goes first, once there is one (idle_show_face) */
 	_body.pack_start (_picture, true, true);
 	_body.pack_start (_placeholder, true, true);
 
@@ -398,7 +539,6 @@ DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, 
 	show_all ();
 
 	/* at its size and with its picture from the start, until its GUI is made */
-	_ui->hide ();
 	show_picture (false);
 	size_body ();
 }
@@ -416,10 +556,39 @@ DeviceFace::release ()
 {
 	_idle.disconnect ();
 	_snap_timer.disconnect ();
-	if (_ui->embed_active ()) {
+	if (_ui && _ui->embed_active ()) {
 		spite_cue_log (string_compose ("face %1: GUI freed", _name.get_text ()));
 		_ui->embed_hide ();
+		faces_free (); /* the MCR may show it */
 	}
+	drop_face (_proc->id ());
+}
+
+/* on screen: mapped, the view's window too (see view_shown ()), and the window it is in
+ * isn't minimized */
+bool
+DeviceFace::face_shown (PBD::ID const&) const
+{
+	return get_mapped () && spite_window_on_screen (get_window ());
+}
+
+/* the MCR takes the face's GUI (it shows the device now): the picture stands in, and the
+ * face takes the GUI back when it shows again (idle_show_face) */
+LV2PluginUI*
+DeviceFace::lend_face (PBD::ID const&)
+{
+	if (!_ui || !_ui->embed_active ()) {
+		return 0;
+	}
+	snapshot (); /* if it shows */
+	_idle.disconnect ();
+	_snap_timer.disconnect ();
+	LV2PluginUI* const ui = _ui;
+	_ui = 0;
+	ui->hide (); /* it moves hidden, and the taker shows it (once PgD4S has seen it hidden) */
+	show_picture (false);
+	size_body ();
+	return ui;
 }
 
 /* the body's size: the GUI's own once it is there, else the picture's (or, with neither, the
@@ -428,7 +597,7 @@ void
 DeviceFace::size_body ()
 {
 	FaceMemory& m = remembered_face (_proc->id ());
-	if (_ui->embed_active () || !m.picture || m.picture->get_height () < 1) {
+	if ((_ui && _ui->embed_active ()) || !m.picture || m.picture->get_height () < 1) {
 		_body.set_size_request (-1, _face_h);
 	} else {
 		_body.set_size_request (rintf (_face_h * m.picture->get_width () / (float) m.picture->get_height ()), _face_h);
@@ -464,7 +633,7 @@ DeviceFace::show_picture (bool washed)
 void
 DeviceFace::snapshot ()
 {
-	if (!_ui->embed_active () || !_ui->get_visible () || !_ui->is_mapped ()) {
+	if (!_ui || !_ui->embed_active () || !_ui->get_visible () || !_ui->is_mapped ()) {
 		return;
 	}
 	Glib::RefPtr<Gdk::Window> win = _ui->get_window ();
@@ -495,20 +664,7 @@ DeviceFace::snapshot ()
 	if (failed) {
 		return;
 	}
-	remembered_face (_proc->id ()).picture = picture;
-
-	std::string const path = face_picture_path (_proc->id ());
-	if (!path.empty ()) {
-		/* written when Spite is idle: it's for the next time the session is opened */
-		Glib::signal_idle ().connect ([picture, path] () {
-			g_mkdir_with_parents (Glib::path_get_dirname (path).c_str (), 0755);
-			try {
-				picture->save (path, "png");
-			} catch (...) {
-			}
-			return false;
-		}, Glib::PRIORITY_LOW);
-	}
+	spite_keep_face_picture (_proc->id (), picture);
 }
 
 /* The GUI is made once the face is mapped (OpenGL needs a shown window) and then kept, since
@@ -521,6 +677,7 @@ void
 DeviceFace::on_map ()
 {
 	Gtk::VBox::on_map ();
+	_turned_to = true; /* its track was selected, or the view shows */
 	_idle.disconnect ();
 	_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
 }
@@ -528,12 +685,33 @@ DeviceFace::on_map ()
 void
 DeviceFace::on_unmap ()
 {
+	view_hidden ();
+	Gtk::VBox::on_unmap ();
+}
+
+void
+DeviceFace::view_shown (bool turned_to)
+{
+	if (!get_visible ()) {
+		return; /* kept for another track */
+	}
+	if (!turned_to && ((_ui && _ui->embed_active ()) || _idle.connected ())) {
+		return; /* it has its GUI (it may be settling, see idle_show_face), or looks soon */
+	}
+	_turned_to = turned_to;
+	_idle.disconnect ();
+	_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
+}
+
+void
+DeviceFace::view_hidden ()
+{
 	_idle.disconnect ();
 	_snap_timer.disconnect ();
-	if (_ui->embed_active ()) {
+	if (_ui && _ui->embed_active ()) {
 		_ui->stop_updating (0); /* nothing shows it */
+		faces_free ();          /* the MCR may show it */
 	}
-	Gtk::VBox::on_unmap ();
 }
 
 void
@@ -546,27 +724,66 @@ DeviceFace::on_unrealize ()
 bool
 DeviceFace::idle_show_face ()
 {
-	if (!get_mapped ()) {
+	/* on screen: mapped, the view's window too (see view_shown ()), in a window that isn't
+	 * minimized (the view is told when it shows again) */
+	if (!face_shown (_proc->id ())) {
 		return false;
 	}
 	if (PluginUIWindow::custom_gui_shown (_pib.get ())) {
-		_ui->hide ();
+		if (_ui) {
+			_ui->hide ();
+		}
 		show_picture (true);
 		size_body ();
 		return false;
 	}
-	_ui->show ();
-	if (_ui->embed_active ()) {
+	if (!_ui || !_ui->embed_active ()) {
+		/* the MCR has its GUI: moved back here, not made again */
+		gint64 const t0 = g_get_monotonic_time ();
+		if (LV2PluginUI* ui = take_face (_proc->id (), _body, _turned_to)) {
+			if (_ui) {
+				_body.remove (*_ui);
+				delete _ui;
+			}
+			_ui = ui;
+			_body.reorder_child (*_ui, 0);
+			spite_cue_log (string_compose ("face %1: GUI taken back from the MCR in %2 ms", _name.get_text (), (g_get_monotonic_time () - t0) / 1000));
+			/* it comes hidden: it stays so a moment longer, its picture showing, until
+			 * PgD4S has seen it hidden and draws all of it again */
+			_idle.disconnect ();
+			_idle = Glib::signal_timeout ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face), SpiteFaceHolder::settle_ms);
+			return false;
+		}
+		SpiteFaceHolder* const h = holder (_proc->id ());
+		if ((h && h != this) || (!h && leave_to_last (_proc->id ()))) {
+			/* the MCR, on screen too, has it (it took it last), or makes it again (it had
+			 * it before its window opened): its picture here */
+			show_picture (false);
+			size_body ();
+			return false;
+		}
+	}
+	if (_ui && _ui->embed_active ()) {
+		_ui->show ();
 		_picture.hide ();
 		_placeholder.hide ();
 		_ui->embed_show (); /* its GUI was kept: updates resume */
+		size_body ();
 		spite_cue_log (string_compose ("face %1: shown again, GUI kept", _name.get_text ()));
 		return false;
 	}
+	if (!_ui) {
+		_ui = new LV2PluginUI (_pib, _lv2);
+		_ui->set_embedded (_scale);
+		_body.pack_start (*_ui, true, true);
+		_body.reorder_child (*_ui, 0);
+	}
+	_ui->show ();
 	gint64 const t0 = g_get_monotonic_time ();
 	_ui->embed_show ();
 	spite_cue_log (string_compose ("face %1: GUI made in %2 ms", _name.get_text (), (g_get_monotonic_time () - t0) / 1000));
 	if (_ui->embed_active ()) {
+		hold_face (_proc->id ());
 		_picture.hide ();
 		_placeholder.hide ();
 		size_body ();
@@ -599,7 +816,9 @@ DeviceFace::gui_showing (PlugInsertBase* pib)
 		/* its window is opening: keep its picture, then let its GUI go (one editor per plugin) */
 		snapshot ();
 		release ();
-		_ui->hide ();
+		if (_ui) {
+			_ui->hide ();
+		}
 		show_picture (true);
 		size_body ();
 	}
@@ -611,6 +830,7 @@ DeviceFace::gui_hidden (PlugInsertBase* pib)
 	if (pib == _pib.get ()) {
 		show_picture (false); /* until its GUI is back */
 		if (get_mapped ()) {
+			_turned_to = false; /* the MCR may show it too: whoever is first makes it */
 			_idle.disconnect ();
 			_idle = Glib::signal_idle ().connect (sigc::mem_fun (*this, &DeviceFace::idle_show_face));
 		}
@@ -668,9 +888,20 @@ RoutePropertiesBox::RoutePropertiesBox ()
 	Gtk::Viewport* viewport = (Gtk::Viewport*) _scroller.get_child();
 	viewport->set_shadow_type(Gtk::SHADOW_NONE);
 	viewport->set_border_width(0);
-	/* Spite: Ctrl+wheel in the Device view, see devices_viewport_realized () */
-	viewport->signal_realize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_viewport_realized));
-	viewport->signal_unrealize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_viewport_unrealized), false);
+	/* Spite: Ctrl+wheel in the Device view, see devices_viewport_realized (); its window's
+	 * map, unmap and state, see watch_toplevel () */
+	_view_connections.push_back (viewport->signal_realize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_viewport_realized)));
+	_view_connections.push_back (viewport->signal_unrealize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_viewport_unrealized), false));
+	_view_connections.push_back (viewport->signal_realize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::watch_toplevel)));
+	_view_connections.push_back (viewport->signal_unrealize ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::unwatch_toplevel), false));
+	/* Spite: the page shows again or goes, see DeviceFace::view_shown () */
+	_view_connections.push_back (viewport->signal_map ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_shown)));
+	_view_connections.push_back (viewport->signal_unmap ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_hidden)));
+	_view_connections.push_back (SpiteFaceHolder::FacesFree.connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_free)));
+	/* Spite: a face that took the keyboard gives it back once the pointer leaves it */
+	viewport->add_events (Gdk::ENTER_NOTIFY_MASK | Gdk::LEAVE_NOTIFY_MASK);
+	_view_connections.push_back (viewport->signal_enter_notify_event ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_crossing), false));
+	_view_connections.push_back (viewport->signal_leave_notify_event ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::devices_crossing), false));
 
 	_box.set_spacing (4);
 	_insert_frame.set_no_show_all ();
@@ -689,6 +920,12 @@ RoutePropertiesBox::RoutePropertiesBox ()
 
 RoutePropertiesBox::~RoutePropertiesBox ()
 {
+	/* Spite: the members go in reverse order, the faces' lists before the scroller, whose
+	 * viewport is unmapped and unrealized as it goes: its handlers must not run then */
+	for (auto& c : _view_connections) {
+		c.disconnect ();
+	}
+	unwatch_toplevel ();
 }
 
 void
@@ -970,6 +1207,95 @@ RoutePropertiesBox::devices_wheel_filter (GdkXEvent* gxev, GdkEvent*, gpointer s
 void RoutePropertiesBox::devices_viewport_realized () {}
 void RoutePropertiesBox::devices_viewport_unrealized () {}
 #endif
+
+void
+RoutePropertiesBox::devices_shown ()
+{
+	for (auto const& face : _faces) {
+		face->view_shown ();
+	}
+}
+
+void
+RoutePropertiesBox::devices_hidden ()
+{
+	for (auto const& face : _all_faces) {
+		face->view_hidden ();
+	}
+}
+
+void
+RoutePropertiesBox::devices_free ()
+{
+	for (auto const& face : _faces) {
+		if (face->get_mapped ()) {
+			face->view_shown (false);
+		}
+	}
+}
+
+/* Minimizing the window the Device view is in, or hiding it (the Cue page's own window),
+ * doesn't unmap the view: its faces are told from the window's own events. Watched from
+ * the moment the view is in a window (it is realized there) until it leaves it. */
+void
+RoutePropertiesBox::watch_toplevel ()
+{
+	unwatch_toplevel ();
+	Gtk::Window* const top = dynamic_cast<Gtk::Window*> (get_toplevel ());
+	if (!top) {
+		return;
+	}
+	_toplevel_connections.push_back (top->signal_map_event ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::toplevel_mapped)));
+	_toplevel_connections.push_back (top->signal_unmap_event ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::toplevel_unmapped)));
+	_toplevel_connections.push_back (top->signal_window_state_event ().connect (sigc::mem_fun (*this, &RoutePropertiesBox::toplevel_state)));
+}
+
+void
+RoutePropertiesBox::unwatch_toplevel ()
+{
+	for (auto& c : _toplevel_connections) {
+		c.disconnect ();
+	}
+	_toplevel_connections.clear ();
+}
+
+bool
+RoutePropertiesBox::toplevel_mapped (GdkEventAny*)
+{
+	Gtk::Widget const* const viewport = _scroller.get_child ();
+	if (viewport && viewport->get_mapped ()) {
+		devices_shown (); /* the user turned to the window */
+	}
+	return false;
+}
+
+bool
+RoutePropertiesBox::toplevel_unmapped (GdkEventAny*)
+{
+	devices_hidden ();
+	return false;
+}
+
+/* a window manager that keeps a minimized window mapped says it is hidden */
+bool
+RoutePropertiesBox::toplevel_state (GdkEventWindowState* ev)
+{
+	if (ev->changed_mask & GDK_WINDOW_STATE_ICONIFIED) {
+		if (ev->new_window_state & GDK_WINDOW_STATE_ICONIFIED) {
+			devices_hidden ();
+		} else {
+			toplevel_mapped (0);
+		}
+	}
+	return false;
+}
+
+bool
+RoutePropertiesBox::devices_crossing (GdkEventCrossing*)
+{
+	Spite::reclaim_keyboard (*this);
+	return false;
+}
 
 void
 RoutePropertiesBox::scroll_devices (int dir)

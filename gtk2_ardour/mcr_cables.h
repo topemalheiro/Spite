@@ -329,6 +329,7 @@ private:
 	bool apply_records ();
 
 	bool cleanup_allowed () const;
+	void restore_connections ();
 	void prune ();
 	void drop_send (std::shared_ptr<ARDOUR::Route>, std::shared_ptr<ARDOUR::Send>);
 	void check_records ();

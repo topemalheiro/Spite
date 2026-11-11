@@ -541,3 +541,9 @@ This mode provides many different operations on both regions and control points,
 @rec|Recorder/rec-undo|                       <@PRIMARY@>z|undo
 @rec|Recorder/rec-redo|           <@PRIMARY@><@TERTIARY@>z|redo
 @rec|Recorder/alternate-rec-redo|             <@PRIMARY@>y|redo
+
+;; Spite: the Modular Channels Rack (Ctrl+E there switches Patch and Play mode, as in plugdata;
+;; Quick Export everywhere else. Escape there lets go of a cable before the global Escape)
+
+@mcr|MCR/play-mode|                           <@PRIMARY@>e|switch between Patch and Play mode
+@mcr|MCR/escape|                                        Escape|let go of the cable being dragged, or deselect it

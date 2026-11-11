@@ -21,7 +21,7 @@ Spite started from Ardour 9 on October 27, 2026. What's done since:
 - **Action macros.** A Macros menu and a Macro Editor. A macro runs a chain of actions from a key, the menu or a control surface, and you can record one just by doing the actions. There's no limit on how many, and they come in sets you can switch between. Every existing shortcut is listed and editable in the same place. A key can work everywhere or on one page only, and a macro can cycle, running one step per press, so a single key can step through pages or layouts.
 - **A Cue page closer to a live setup.** Scenes are numbered 1, 2, 3 instead of lettered A to P. The master bus has its own strip on the right with the scene buttons, like Live's Main track. Strips can hide their device lists, clips take their track's colour unless given their own, and the bottom panel says "No clip selected." instead of staying blank.
 - **Scripting clips.** Lua scripts can load clips into a track's slots (`Route:triggerbox()`, `TriggerBox:set_from_path()`), the first step towards building ready-to-play sets without the GUI.
-- **The Modular Channels Rack (MCR).** A new window, opened with the MCR button next to Rec, Edit, Cue and Mix, or Alt+P. Every track's devices sit in rows, one row per track, in plugdata's look. plugdata for Spite devices show their faces, and other plugins get a card. Double-click opens a device's own window. Right-click offers "Edit in plugdata for Spite", the generic controls, and turning the device off or on; the faces in the Device view have the same menu.
+- **The Modular Channels Rack (MCR).** A new window, opened with the MCR button next to Rec, Edit, Cue and Mix, or Alt+P, and detachable like them. Every track's devices sit in rows, one row per track, in plugdata's look: plugdata for Spite devices show their live faces, and other plugins get a card. In Patch mode (Ctrl+E), drag a cable from a device's output to a device on another track. Cables are drawn over the live faces, audio and MIDI arrive in the same buffer, loops are refused, and jacks move to the edge facing their cable. Slivers between the rows open for patching and close to small labels, by mouse or from a macro. plugdata's Detective Mode shows the MIDI and levels travelling along the cables, with speed, pause, step and a history. Right-click a device for "Edit in plugdata for Spite", its generic controls, or turning it off or on; the faces in the Device view have the same menu.
 
 ## Roadmap
 
@@ -32,7 +32,7 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 - **Device view (in progress).** The selected track's devices as a chain across the bottom panel, like Live's, with Shift+Tab switching between the clip and its devices. Devices become modules that collapse and enlarge.
 - **Custom views.** A Views menu to save and edit views (which panels, sidebars, strips and device layout each page shows) and to switch or cycle between them from a key or a control surface.
 - **As many scenes as a set needs.** The letters are gone. Next, a set stops being capped at 16 scenes.
-- **Cables in the MCR (in progress).** plugdata's cables between devices on different tracks, drawn over the live faces, with Detective Mode. Audio and MIDI pass in the same buffer, and slivers between the rows open for patching and close to small labels.
+- **More for the MCR.** Cables within a track, loops through a cable that waits one buffer, and cables to device parameters for modulation.
 
 **After that:**
 

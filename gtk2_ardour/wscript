@@ -167,8 +167,11 @@ gtk2_ardour_sources = [
         'macro_manager.cc',
         'main_clock.cc',
         'marker.cc',
+        'mcr_bar.cc',
+        'mcr_cables.cc',
         'mcr_canvas.cc',
         'mcr_page.cc',
+        'mcr_patch.cc',
         'mergeable_line.cc',
         'midi_automation_line.cc',
         'midi_channel_dialog.cc',
@@ -219,6 +222,9 @@ gtk2_ardour_sources = [
         'panner_ui.cc',
         'patch_change.cc',
         'patch_change_widget.cc',
+        'pd_cord.cc',
+        'pd_detective.cc',
+        'pd_theme.cc',
         'pianokeyboard.cc',
         'piano_key_bindings.cc',
         'piano_roll_header.cc',
@@ -507,6 +513,33 @@ def enoify (major, minor):
 def options(opt):
     pass
 
+# Spite: the MCR paints its live plugin faces itself, from their composited
+# windows' pixmaps (Composite names them, cairo-xlib paints them)
+mcr_face_packages = [
+    ('xcomposite', 'XCOMPOSITE', '0.4'),
+    ('cairo-xlib', 'CAIRO_XLIB', '1.12'),
+]
+
+def mcr_faces_found(bld):
+    """True when both are there. A tree configured before configure () checked
+    for them looks for them now, so it doesn't need configuring again."""
+    from waflib.Tools import c_config
+    env = bld.env
+    for pkg, store, version in mcr_face_packages:
+        if env['CHECKED_' + store]:
+            continue
+        try:
+            flags = subprocess.check_output(env.PKGCONFIG + ['--cflags', '--libs', '%s >= %s' % (pkg, version)],
+                                            stderr=subprocess.STDOUT).decode('utf-8')
+        except Exception:
+            flags = None
+        env['CHECKED_' + store] = 1
+        if flags is not None:
+            c_config.parse_flags(bld, flags, store, env)
+            env.append_unique('DEFINES_' + store, 'HAVE_%s=1' % store)
+            env['HAVE_' + store] = 1
+    return all(env['HAVE_' + store] for pkg, store, version in mcr_face_packages)
+
 def configure(conf):
     conf.load('misc')  # make 'command-output' available
 
@@ -520,6 +553,10 @@ def configure(conf):
                       atleast_version='2.10.1')
     autowaf.check_pkg(conf, 'ogg', uselib_store='OGG', atleast_version='1.1.2')
     autowaf.check_pkg(conf, 'x11', uselib_store='X11', atleast_version='1.1', mandatory=False)
+    if sys.platform != 'darwin' and conf.env['build_target'] != 'mingw' and conf.env['build_target'] != 'msvc':
+        for pkg, store, version in mcr_face_packages:
+            autowaf.check_pkg(conf, pkg, uselib_store=store, atleast_version=version,
+                              mandatory=False, global_define=False)
     autowaf.check_pkg(conf, 'pangoft2', uselib_store='PANGOFT2', atleast_version='1.36.8', mandatory=False)
     autowaf.check_pkg(conf, 'fontconfig', uselib_store='FONTCONFIG')
 
@@ -590,6 +627,8 @@ def build(bld):
         obj.uselib       = 'UUID FLAC FONTCONFIG GTHREAD GTK OGG PANGOMM CURL DL CANVAS FFTW3F LO TAGLIB XML LILV RUBBERBAND AUBIO LRDF ARCHIVE VAMPSDK VAMPHOSTSDK'
         obj.source += [ 'luadoc.cc', 'bundle_env_linux.cc' ]
         obj.use    += [ 'X11' ]
+        if mcr_faces_found(bld):
+            obj.uselib += ' XCOMPOSITE CAIRO_XLIB'
         obj.use    += [ 'libytk', 'libytkmm' ]
         obj.uselib += ' GLIBMM GIOMM PANGOMM PANGOFT2 LIBPNG LIBJPEG'
 
@@ -713,6 +752,8 @@ def build(bld):
     else:
         obj.source += [ 'bundle_env_linux.cc' ]
         obj.use += [ 'X11' ]
+        if mcr_faces_found(bld):
+            obj.uselib += ' XCOMPOSITE CAIRO_XLIB'
 
     obj.includes += ['../libs']
     obj.includes += ['../libs/vst3']
@@ -1007,6 +1048,12 @@ def build(bld):
     bld.install_files(os.path.join (bld.env['DATADIR'], 'icons'), bld.path.ant_glob('icons/*.png'))
     bld.install_files(bld.env['DATADIR'], 'ArdourMono.ttf')
     bld.install_files(bld.env['DATADIR'], 'ArdourSans.ttf')
+
+    # Spite: plugdata's font (Inter), for the MCR's cables and Detective Mode. Copied next to
+    # the binary, so a run from the build finds it on the data path too.
+    inter = bld.path.find_resource('../plugdata/Resources/Fonts/InterRegular.ttf')
+    if inter:
+        bld(rule = 'cp ${SRC} ${TGT}', source = inter, target = 'InterRegular.ttf', install_path = bld.env['DATADIR'])
 
     # Application/Product specific resources (icon, splash)
     pgmname = bld.env['PROGRAM_NAME']

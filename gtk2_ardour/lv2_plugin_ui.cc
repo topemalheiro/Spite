@@ -601,6 +601,15 @@ LV2PluginUI::embed_hide ()
 	lv2ui_free ();
 }
 
+GtkWidget*
+LV2PluginUI::embed_socket () const
+{
+	if (!_inst || _lv2->is_external_ui ()) {
+		return 0;
+	}
+	return (GtkWidget*) suil_instance_get_widget ((SuilInstance*) _inst);
+}
+
 void
 LV2PluginUI::set_face_scale (float scale)
 {

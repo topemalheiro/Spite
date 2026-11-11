@@ -43,6 +43,7 @@ namespace ARDOUR {
 }
 
 class GenericPluginUI;
+class LV2PluginUI;
 class ProcessorBox;
 
 /* Spite: a log of the Cue page's bottom panel sizes and its device faces' GUIs,
@@ -52,6 +53,68 @@ void spite_cue_log (std::string const&);
 /* Spite: the last picture the Device view kept of a device's face (by its processor),
  * for whatever stands in for the face (the MCR); none if the face never showed */
 Glib::RefPtr<Gdk::Pixbuf> spite_face_picture (PBD::ID const&);
+/* a newer picture of a device's face, taken elsewhere (the MCR): kept as the Device
+ * view keeps its own, for this run and the next time the session opens */
+void spite_keep_face_picture (PBD::ID const&, Glib::RefPtr<Gdk::Pixbuf>);
+
+/* Spite: a window shows on screen: it is viewable, in a window that isn't minimized. A
+ * window manager unmaps a minimized window (or says it is hidden), and GDK still calls
+ * the windows in it viewable. */
+bool spite_window_on_screen (Glib::RefPtr<Gdk::Window const> const&);
+
+/* Spite: the face lease. A PgD4S device's face is its live GUI (an LV2PluginUI, which
+ * takes 0.3-0.5 s to make), and a plugin has one GUI at a time. The Cue page's Device
+ * view and the MCR both show devices' faces: whichever shows a device holds its GUI,
+ * and takes it from the other by moving it into its own container, so it isn't made
+ * again. With both on screen (the MCR in a window of its own), the one shown last keeps
+ * the GUIs it took, and the other shows the faces' pictures. An open plugin window wins
+ * over both: whoever holds the GUI frees it when the plugin's own window opens
+ * (PluginUIWindow::CustomGUIShowing). */
+class SpiteFaceHolder
+{
+public:
+	virtual ~SpiteFaceHolder ();
+
+	/* who holds the device's GUI, if anyone */
+	static SpiteFaceHolder* holder (PBD::ID const& device);
+
+	/* how long a moved GUI stays hidden before it shows (its picture stands in): moving
+	 * hides a GUI's windows, which loses what they showed, and PgD4S only draws all of
+	 * it again once it has seen it hidden, which it looks for every 200 ms */
+	static int const settle_ms = 300;
+
+	/* A holder stopped showing faces (its view went, or it let their GUIs go): the holders
+	 * on screen take the GUIs of the devices they show, or make them. Emitted once Spite
+	 * is idle, after the page switch (or the window that hid) is done. */
+	static sigc::signal<void> FacesFree;
+
+protected:
+	/* The device's GUI, from whoever holds it, moved into `to` (packed last in a box, at
+	 * 0,0 in a layout): this holder holds it now. Both containers must be realized: GTK
+	 * then only unmaps the GUI while X moves its windows, the plugin's along.
+	 * `shown_too`: this holder was just shown (the user turned to it), so it takes the GUI
+	 * from a holder that shows the device too; else only from one that doesn't, so two
+	 * views on screen at once never pass a GUI back and forth.
+	 * 0 if no one has it (make one), the holder keeps it, or it couldn't move (it is freed
+	 * then: make one). */
+	LV2PluginUI* take_face (PBD::ID const& device, Gtk::Container& to, bool shown_too);
+	/* this holder made the device's GUI */
+	void hold_face (PBD::ID const& device);
+	/* this holder freed its GUI of the device (or goes) */
+	void drop_face (PBD::ID const& device);
+	/* faces may be free now: see FacesFree */
+	static void faces_free ();
+	/* No one holds the device's GUI (its window had it, or a view freed it), and the view
+	 * that held it last shows the device too: that one makes it again, not this one */
+	bool leave_to_last (PBD::ID const& device) const;
+
+	/* Another holder takes the device's GUI: let go of it (it stays in this holder's
+	 * container until the taker moves it) and stand in with the face's picture. Returns
+	 * the GUI, or 0 if this holder has none after all. */
+	virtual LV2PluginUI* lend_face (PBD::ID const& device) = 0;
+	/* this holder's face of the device is on screen now (its view is) */
+	virtual bool face_shown (PBD::ID const& device) const = 0;
+};
 
 class RoutePropertiesBox : public Gtk::HBox, public ARDOUR::SessionHandlePtr
 {
@@ -128,6 +191,24 @@ private:
 	void devices_viewport_unrealized ();
 	static GdkFilterReturn devices_wheel_filter (GdkXEvent*, GdkEvent*, gpointer);
 	void scroll_devices (int dir);
+	/* the pointer left a face (into the devices' row, or out of it) */
+	bool devices_crossing (GdkEventCrossing*);
+	/* the page shows again or goes: the faces are told */
+	void devices_shown ();
+	void devices_hidden ();
+	/* another view let faces go (SpiteFaceHolder::FacesFree): the faces shown take them */
+	void devices_free ();
+	/* the window the Device view is in is minimized or hidden, or shows again (GTK
+	 * doesn't unmap the view then): the faces are told too */
+	void watch_toplevel ();
+	void unwatch_toplevel ();
+	bool toplevel_mapped (GdkEventAny*);
+	bool toplevel_unmapped (GdkEventAny*);
+	bool toplevel_state (GdkEventWindowState*);
+
+	/* the view's signals, and its window's: dropped before the faces go */
+	std::vector<sigc::connection> _view_connections;
+	std::vector<sigc::connection> _toplevel_connections;
 
 	int _idle_refill_processors_id;
 

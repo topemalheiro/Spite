@@ -796,6 +796,7 @@ McrCables::McrCables (Session& s, PBD::EventLoop* event_loop)
 	/* clean-ups wait while recording and while the engine is stopped: do them once that ends */
 	_session.RecordStateChanged.connect (_session_connections, _invalidation, std::bind (&McrCables::queue_update, this, true), _event_loop);
 	AudioEngine::instance ()->Running.connect (_session_connections, _invalidation, std::bind (&McrCables::queue_update, this, true), _event_loop);
+	restore_connections ();
 	watch ();
 	apply_records ();
 	queue_update (true);
@@ -1633,6 +1634,59 @@ McrCables::cleanup_allowed () const
 	return !_session.actively_recording () && AudioEngine::instance ()->running () && !Session::get_disable_all_loaded_plugins ();
 }
 
+/** A session loaded in the GUI can come up with the cables' ports not connected, though
+ * each port remembers its connections (they are in its state, and saved again): the
+ * MCR's sends were connected before the sidechains they feed had settled. Those would
+ * then count as lost (see prune ()) and their cables would go: such ports are connected
+ * again as they remember, first. A connection removed elsewhere (a routing grid) is
+ * forgotten by its port, so it stays removed.
+ */
+void
+McrCables::restore_connections ()
+{
+	if (!AudioEngine::instance ()->running ()) {
+		return;
+	}
+
+	std::vector<std::shared_ptr<Port> > ports;
+	std::shared_ptr<RouteList const>    routes (_session.get_routes ());
+	for (auto const& r : *routes) {
+		for (auto const& p : processors_of (r)) {
+			std::shared_ptr<IO>           io;
+			std::shared_ptr<Send>         s (std::dynamic_pointer_cast<Send> (p));
+			std::shared_ptr<PluginInsert> pi (std::dynamic_pointer_cast<PluginInsert> (p));
+			PBD::ID                       id;
+			if (s && mcr_source (s, id)) {
+				io = s->output ();
+			} else if (pi && pi->extra_xml (target_tag)) {
+				io = pi->sidechain_input ();
+			}
+			if (!io) {
+				continue;
+			}
+			std::shared_ptr<PortSet> ps (io->ports ());
+			for (uint32_t i = 0; i < ps->num_ports (); ++i) {
+				ports.push_back (ps->port (i));
+			}
+		}
+	}
+
+	for (auto const& port : ports) {
+		if (port->connected ()) {
+			continue; /* (a port that is connected keeps what it has) */
+		}
+		XMLNode const& state (port->get_state ());
+		bool           remembers = false;
+		for (auto const& c : state.children ()) {
+			remembers |= c->name () == X_("Connection");
+		}
+		delete &state;
+		if (remembers) {
+			port->reconnect ();
+		}
+	}
+}
+
 /** a send whose source device is gone takes its cables with it, as an object's cords go
  * with it in plugdata; a target pin whose port lost its last connection elsewhere (its
  * send's track was deleted, or the ports were disconnected in a routing grid) goes back
@@ -1880,6 +1934,7 @@ McrCables::idle_update ()
 		if (cleanup_allowed ()) {
 			/* else it waits: RecordStateChanged and Running queue it again */
 			_rewatch_pending = false;
+			restore_connections (); /* before anything counts as lost */
 			prune ();
 			std::shared_ptr<RouteList const> routes (_session.get_routes ());
 			for (auto const& r : *routes) {

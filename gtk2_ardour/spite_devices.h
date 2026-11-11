@@ -27,6 +27,10 @@ namespace ARDOUR {
 	class Processor;
 }
 
+namespace Gtk {
+	class Widget;
+}
+
 namespace Spite {
 
 /* Which devices show a live face of their own: PgD4S (plugdata for Spite) does,
@@ -53,5 +57,13 @@ std::string device_name (std::shared_ptr<ARDOUR::Processor>);
 /* open the device's own window: its custom GUI (for PgD4S, the patch editor)
  * or its generic controls. An open window is raised, never closed. */
 void open_device_window (std::shared_ptr<ARDOUR::Processor>, bool custom);
+
+/* A face (a plugin GUI embedded in a page) takes the keyboard when it is clicked:
+ * JUCE gives its own X window the X input focus, which GTK knows nothing of, and
+ * Spite's keys (Alt+P, Ctrl+E...) then go to the plugin until the window manager
+ * activates Spite's window again. This gives the keyboard back to the widget's
+ * window if a plugin window inside it has it; the views call it when the pointer
+ * leaves a face, or when Spite itself is clicked. */
+void reclaim_keyboard (Gtk::Widget&);
 
 } /* namespace Spite */

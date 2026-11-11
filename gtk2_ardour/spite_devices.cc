@@ -34,6 +34,12 @@
 #include "spite_devices.h"
 #include "utils.h"
 
+/* X last: its macros (None...) clash with names in the headers above */
+#ifdef GDK_WINDOWING_X11
+#include <X11/Xatom.h>
+#include <ydk/gdkx.h>
+#endif
+
 using namespace ARDOUR;
 
 /* PgD4S keeps plugdata's URIs (old sessions keep loading), so they only say
@@ -146,4 +152,75 @@ Spite::open_device_window (std::shared_ptr<Processor> p, bool custom)
 			w->present ();
 		}
 	}
+}
+
+void
+Spite::reclaim_keyboard (Gtk::Widget& w)
+{
+#ifdef GDK_WINDOWING_X11
+	Gtk::Widget* const top = w.get_toplevel ();
+	if (!top || !top->get_realized () || !top->get_window ()) {
+		return;
+	}
+	GdkWindow* const  gtop = top->get_window ()->gobj ();
+	GdkDisplay* const gdpy = gdk_drawable_get_display (gtop);
+	::Display* const  dpy  = GDK_WINDOW_XDISPLAY (gtop);
+	::Window const    txid = GDK_WINDOW_XID (gtop);
+
+	::Window focus  = None;
+	int      revert = 0;
+	XGetInputFocus (dpy, &focus, &revert);
+	if (focus == None || focus == PointerRoot || gdk_xid_table_lookup_for_display (gdpy, focus)) {
+		return; /* nowhere, or a window GTK knows (its own focus window among them) */
+	}
+
+	/* a window GTK doesn't know: a plugin's, in this toplevel? */
+	bool inside = false;
+	gdk_error_trap_push ();
+	for (::Window x = focus; x;) {
+		::Window     root     = None;
+		::Window     parent   = None;
+		::Window*    children = 0;
+		unsigned int n        = 0;
+		if (!XQueryTree (dpy, x, &root, &parent, &children, &n)) {
+			break;
+		}
+		if (children) {
+			XFree (children);
+		}
+		if (parent == txid) {
+			inside = true;
+			break;
+		}
+		x = (parent == root) ? None : parent;
+	}
+	gdk_error_trap_pop ();
+	if (!inside) {
+		return;
+	}
+
+	/* back to where the window manager gives it to Spite: GDK's focus window, which GDK
+	 * names as the toplevel's _NET_WM_USER_TIME_WINDOW (else the toplevel itself) */
+	::Window       to     = txid;
+	Atom           type   = None;
+	int            format = 0;
+	unsigned long  items  = 0;
+	unsigned long  after  = 0;
+	unsigned char* data   = 0;
+	if (XGetWindowProperty (dpy, txid, gdk_x11_get_xatom_by_name_for_display (gdpy, "_NET_WM_USER_TIME_WINDOW"), 0, 1, False, XA_WINDOW,
+	                        &type, &format, &items, &after, &data) == Success && data) {
+		if (type == XA_WINDOW && format == 32 && items == 1) {
+			to = *(::Window*) data;
+		}
+		XFree (data);
+	}
+
+	/* The window manager may unmap the window just now (minimize it): X then fails, and
+	 * its error comes back only once X has done the request. It is waited for (a round
+	 * trip, only when a plugin had the keyboard): an error after the trap ends Spite. */
+	gdk_error_trap_push ();
+	XSetInputFocus (dpy, to, RevertToParent, CurrentTime);
+	gdk_flush ();
+	gdk_error_trap_pop ();
+#endif
 }
