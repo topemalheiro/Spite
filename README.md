@@ -22,7 +22,7 @@ Spite started from Ardour 9 on October 27, 2026. What's done since:
 - **A Cue page closer to a live setup.** Scenes are numbered 1, 2, 3 instead of lettered A to P. The master bus has its own strip on the right with the scene buttons, like Live's Main track. Strips can hide their device lists, clips take their track's colour unless given their own, and the bottom panel says "No clip selected." instead of staying blank.
 - **Scripting clips.** Lua scripts can load clips into a track's slots (`Route:triggerbox()`, `TriggerBox:set_from_path()`), the first step towards building ready-to-play sets without the GUI.
 - **The Modular Channels Rack (MCR).** A new window, opened with the MCR button next to Rec, Edit, Cue and Mix, or Alt+P, and detachable like them. Every track's devices sit in rows, one row per track, in plugdata's look: plugdata for Spite devices show their live faces, and other plugins get a card. In Patch mode (Ctrl+E), drag a cable from a device's output to a device on another track. Cables are drawn over the live faces, audio and MIDI arrive in the same buffer, loops are refused, and jacks move to the edge facing their cable. Slivers between the rows open for patching and close to small labels, by mouse or from a macro. plugdata's Detective Mode shows the MIDI and levels travelling along the cables, with speed, pause, step and a history. Right-click a device for "Edit in plugdata for Spite", its generic controls, or turning it off or on; the faces in the Device view have the same menu.
-- **Max for Live devices as plugdata for Spite devices.** A converter turns `.amxd` devices into plugdata patches with Live's controls and the device's own face, installed as presets Spite's plugin browser lists (see [Max for Live devices](#max-for-live-devices)).
+- **Max for Live devices as PlugData for Spite devices.** A converter turns `.amxd` devices into plugdata patches with Live's controls and the device's own face, installed as presets Spite's plugin browser lists (see [Max for Live devices](#max-for-live-devices)).
 
 ## Roadmap
 
@@ -159,7 +159,7 @@ cmake --install build --prefix ~/.local
 
 The build puts the plugdata app and its plugins in `plugdata/Plugins`. On Linux, the last step copies the VST3 and LV2 plugins to `~/.vst3` and `~/.lv2`, where Spite finds them, and the app to `~/.local/bin/plugdata`; then use Scan for Plugins in Spite's Preferences, under Plugins. On macOS and Windows, `cmake --install` puts them in the system's plugin folders, which needs admin rights.
 
-### Max for Live devices
+### Max for Live (M4L) as PlugData for Spire devices (PgD4S)
 
 `tools/m4l/m4l2pd.py` turns Max for Live devices (`.amxd` files) into plugdata for Spite (PgD4S) devices. It needs only Python 3, and PgD4S built as above. To convert devices and install them:
 
