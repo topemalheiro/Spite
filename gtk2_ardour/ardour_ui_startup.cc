@@ -358,6 +358,25 @@ ARDOUR_UI::trigger_page_settings () const
 }
 
 XMLNode*
+ARDOUR_UI::mcr_page_settings () const
+{
+	XMLNode* node = 0;
+
+	if (_session) {
+		node = _session->instant_xml (X_("MCRPage"));
+	} else {
+		node = Config->instant_xml (X_("MCRPage"));
+	}
+
+	if (!node) {
+		static XMLNode empty (X_("MCRPage")); /* only read */
+		node = &empty;
+	}
+
+	return node;
+}
+
+XMLNode*
 ARDOUR_UI::clock_mode_settings () const
 {
 	XMLNode* node = 0;

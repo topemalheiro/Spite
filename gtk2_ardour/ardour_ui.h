@@ -155,6 +155,7 @@ class Mixer_UI;
 class PublicEditor;
 class RecorderUI;
 class TriggerPage;
+class MCRPage;
 class SaveAsDialog;
 class SaveTemplateDialog;
 class SessionDialog;
@@ -275,6 +276,7 @@ public:
 	PublicEditor&	  the_editor() { return *editor;}
 	Mixer_UI* the_mixer() { return mixer; }
 	TriggerPage* the_trigger_page() { return trigger_page; }
+	MCRPage* the_mcr_page () { return mcr_page; } /* Spite: Modular Channels Rack */
 
 	Gtk::Menu* shared_popup_menu ();
 
@@ -308,6 +310,7 @@ public:
 	XMLNode* preferences_settings() const;
 	XMLNode* mixer_settings () const;
 	XMLNode* trigger_page_settings () const;
+	XMLNode* mcr_page_settings () const;
 	XMLNode* recorder_settings () const;
 	XMLNode* keyboard_settings () const;
 	XMLNode* clock_mode_settings () const;
@@ -460,6 +463,7 @@ private:
 	Mixer_UI*      mixer;
 	RecorderUI*    recorder;
 	TriggerPage*   trigger_page;
+	MCRPage*       mcr_page; /* Spite: Modular Channels Rack */
 	Gtk::Tooltips _tooltips;
 	NSM_Client*    nsm;
 	bool          _was_dirty;
@@ -677,6 +681,7 @@ private:
 	int         create_masters ();
 	int         create_recorder ();
 	int         create_trigger_page ();
+	int         create_mcr_page ();
 
 	Meterbridge  *meterbridge;
 
@@ -861,6 +866,7 @@ private:
 	ArdourWidgets::ArdourButton prefs_visibility_button;
 	ArdourWidgets::ArdourButton recorder_visibility_button;
 	ArdourWidgets::ArdourButton trigger_page_visibility_button;
+	ArdourWidgets::ArdourButton mcr_page_visibility_button;
 
 	bool key_press_focus_accelerator_handler (Gtk::Window& window, GdkEventKey* ev, Gtkmm2ext::BindingSet*);
 	bool try_gtk_accel_binding (GtkWindow* win, GdkEventKey* ev, bool translate, GdkModifierType modifier);

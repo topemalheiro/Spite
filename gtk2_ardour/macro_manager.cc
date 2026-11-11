@@ -144,6 +144,7 @@ MacroManager::scopes ()
 	s.push_back (make_pair (string (X_("Mixer")), string (_("Mixer"))));
 	s.push_back (make_pair (string (X_("Cues")), string (_("Cues"))));
 	s.push_back (make_pair (string (X_("Recorder")), string (_("Recorder"))));
+	s.push_back (make_pair (string (X_("MCR")), string (_("Modular Channels Rack"))));
 	return s;
 }
 

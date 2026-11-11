@@ -65,6 +65,7 @@
 #include "mixer_ui.h"
 #include "recorder_ui.h"
 #include "trigger_page.h"
+#include "mcr_page.h"
 #include "utils.h"
 #include "midi_tracer.h"
 #include "global_port_matrix.h"
@@ -176,6 +177,7 @@ ARDOUR_UI::setup_transport ()
 	prefs_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-preferences-visibility")));
 	recorder_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-recorder-visibility")));
 	trigger_page_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-trigger-visibility")));
+	mcr_page_visibility_button.set_related_action (ActionManager::get_action (X_("Common"), X_("change-mcr-visibility")));
 
 	/* connect signals */
 	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (*primary_clock, &MainClock::set), false, false));
@@ -196,6 +198,8 @@ ARDOUR_UI::setup_transport ()
 	prefs_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("preferences")), false);
 	recorder_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("recorder")), false);
 	trigger_page_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("trigger")), false);
+	/* Spite: no drag_failed for the MCR's button: dragging it off would detach it */
+	mcr_page_visibility_button.signal_button_press_event ().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("mcr")), false);
 
 	/* setup widget style/name */
 
@@ -204,6 +208,7 @@ ARDOUR_UI::setup_transport ()
 	prefs_visibility_button.set_name (X_("page switch button"));
 	recorder_visibility_button.set_name (X_("page switch button"));
 	trigger_page_visibility_button.set_name (X_("page switch button"));
+	mcr_page_visibility_button.set_name (X_("page switch button"));
 
 	/* and widget text */
 
@@ -229,6 +234,8 @@ ARDOUR_UI::setup_transport ()
 	                                    string_compose (_("Left-Click to show the %1 window\n"
 	                                                      "Right-click to show more options"), trigger_page->name()));
 
+	Gtkmm2ext::UI::instance ()->set_tip (mcr_page_visibility_button, _("Modular Channels Rack"));
+
 
 	/* transport control size-group */
 
@@ -238,6 +245,7 @@ ARDOUR_UI::setup_transport ()
 	button_height_size_group->add_widget (editor_visibility_button);
 	button_height_size_group->add_widget (mixer_visibility_button);
 	button_height_size_group->add_widget (prefs_visibility_button);
+	button_height_size_group->add_widget (mcr_page_visibility_button);
 
 	/* and the main table layout */
 	int vpadding = 3;
@@ -250,6 +258,9 @@ ARDOUR_UI::setup_transport ()
 	++col;
 	tabbables_table.attach (editor_visibility_button,       TCOL, 0, 1 , FILL, FILL, hpadding, vpadding);
 	tabbables_table.attach (mixer_visibility_button,        TCOL, 1, 2 , FILL, FILL, hpadding, vpadding);
+	++col;
+	/* Spite: the Modular Channels Rack */
+	tabbables_table.attach (mcr_page_visibility_button,     TCOL, 0, 1 , FILL, FILL, hpadding, vpadding);
 	++col;
 
 	tabbables_table.show_all ();

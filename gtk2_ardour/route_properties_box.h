@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include <ydkmm/pixbuf.h>
 #include <ytkmm/box.h>
 #include <ytkmm/label.h>
 #include <ytkmm/scrolledwindow.h>
@@ -47,6 +48,10 @@ class ProcessorBox;
 /* Spite: a log of the Cue page's bottom panel sizes and its device faces' GUIs,
  * written afresh each run to cue-layout.log in Spite's cache folder */
 void spite_cue_log (std::string const&);
+
+/* Spite: the last picture the Device view kept of a device's face (by its processor),
+ * for whatever stands in for the face (the MCR); none if the face never showed */
+Glib::RefPtr<Gdk::Pixbuf> spite_face_picture (PBD::ID const&);
 
 class RoutePropertiesBox : public Gtk::HBox, public ARDOUR::SessionHandlePtr
 {

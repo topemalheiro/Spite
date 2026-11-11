@@ -32,17 +32,20 @@
 #include "ardour/session.h"
 
 #include "gtkmm2ext/gui_thread.h"
+#include "gtkmm2ext/keyboard.h"
 #include "gtkmm2ext/utils.h"
 
 #include "widgets/tooltips.h"
 
 #include "ardour_ui.h"
+#include "context_menu_helper.h"
 #include "mixer_ui.h"
 #include "plugin_selector.h"
 #include "plugin_ui.h"
 #include "port_insert_ui.h"
 #include "lv2_plugin_ui.h"
 #include "route_properties_box.h"
+#include "spite_devices.h"
 #include "timers.h"
 #include "ui_config.h"
 
@@ -320,6 +323,12 @@ remembered_face (PBD::ID const& id)
 	return m;
 }
 
+Glib::RefPtr<Gdk::Pixbuf>
+spite_face_picture (PBD::ID const& id)
+{
+	return remembered_face (id).picture;
+}
+
 /* a face whose device's window is open: Live's washed-out look */
 static Glib::RefPtr<Gdk::Pixbuf>
 washed_out (Glib::RefPtr<Gdk::Pixbuf> const& src)
@@ -341,21 +350,9 @@ washed_out (Glib::RefPtr<Gdk::Pixbuf> const& src)
 	return p;
 }
 
-/* the device's name, as Live shows it: a converted Max for Live device's own name (its preset
- * is "M4L: <name>"), else the processor's name */
-static std::string
-device_name (std::shared_ptr<Processor> p, std::shared_ptr<LV2Plugin> lv2)
-{
-	std::string const label = lv2->last_preset ().label;
-	if (label.compare (0, 5, "M4L: ") == 0 && label.size () > 5) {
-		return label.substr (5);
-	}
-	return p->display_name ();
-}
-
 DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, std::shared_ptr<PlugInsertBase> pib, std::shared_ptr<LV2Plugin> lv2, int face_h, int title_h)
 	: _enable_btn (ArdourButton::just_led_default_elements)
-	, _name (device_name (p, lv2))
+	, _name (Spite::device_name (p)) /* a converted Max for Live device's own name */
 	, _ui (new LV2PluginUI (pib, lv2))
 	, _proc (p)
 	, _pib (pib)
@@ -383,7 +380,7 @@ DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, 
 	_title.add_events (Gdk::BUTTON_PRESS_MASK);
 	_title.signal_button_press_event ().connect (sigc::mem_fun (*this, &DeviceFace::title_press), false);
 	set_tooltip (&_enable_btn, _("Turn the device on or off"));
-	set_tooltip (&_title, _("Double-click to open its window"));
+	set_tooltip (&_title, _("Double-click to open its window, right-click for more"));
 
 	_placeholder.set_text (_("In its window"));
 	_placeholder.set_no_show_all ();
@@ -623,8 +620,28 @@ DeviceFace::gui_hidden (PlugInsertBase* pib)
 bool
 DeviceFace::title_press (GdkEventButton* ev)
 {
+	if (Gtkmm2ext::Keyboard::is_context_menu_event (ev)) {
+		/* the face's body is the plugin's own: only its title bar has the menu */
+		using namespace Gtk::Menu_Helpers;
+		std::weak_ptr<Processor> wp (_proc);
+		Gtk::Menu*               m     = ARDOUR_UI_UTILS::shared_popup_menu ();
+		MenuList&                items = m->items ();
+		items.push_back (MenuElem (_("Edit in plugdata for Spite"), [wp] () { Spite::open_device_window (wp.lock (), true); }));
+		items.push_back (MenuElem (_("Generic Controls..."), [wp] () { Spite::open_device_window (wp.lock (), false); }));
+		items.push_back (SeparatorElem ());
+		items.push_back (MenuElem (_proc->enabled () ? _("Turn Off") : _("Turn On"), [wp] () {
+			if (std::shared_ptr<Processor> p = wp.lock ()) {
+				p->enable (!p->enabled ());
+			}
+		}));
+		m->popup (ev->button, ev->time);
+		return true;
+	}
 	if (ev->type == GDK_2BUTTON_PRESS && ev->button == 1) {
-		_proc->ShowUI (); /* the plugin's window: PgD4S shows its patch editor there */
+		/* the plugin's window: PgD4S shows its patch editor there. Always its own GUI (not
+		 * the generic controls a session may have used last), and an open one is raised,
+		 * never closed */
+		Spite::open_device_window (_proc, true);
 		return true;
 	}
 	return false;
@@ -1054,20 +1071,20 @@ void
 RoutePropertiesBox::add_processor_to_display (std::weak_ptr<Processor> w)
 {
 	std::shared_ptr<Processor> p = w.lock ();
+	/* Spite: the devices the MCR shows too (plugins, nothing hidden or internal) */
+	if (!Spite::is_device (p)) {
+		return;
+	}
 	std::shared_ptr<PlugInsertBase> pib = std::dynamic_pointer_cast<PlugInsertBase> (p);
 	if (!pib) {
 		return;
 	}
-#ifdef MIXBUS
-	if (std::dynamic_pointer_cast<PluginInsert> (pib)->channelstrip () != Processor::None) {
-		return;
-	}
-#endif
 	if (_device_faces) {
-		/* Spite: PgD4S (plugdata for Spite) shows its own face */
+		/* Spite: PgD4S (plugdata for Spite) shows its own face; stock plugdata, which has
+		 * the same plugin URIs, does not (it would show its whole editor) */
 		std::shared_ptr<PluginInsert> pi  = std::dynamic_pointer_cast<PluginInsert> (pib);
 		std::shared_ptr<LV2Plugin>    lv2 = pi ? std::dynamic_pointer_cast<LV2Plugin> (pi->plugin ()) : std::shared_ptr<LV2Plugin> ();
-		if (lv2 && lv2->has_editor () && !lv2->is_external_ui () && std::string (lv2->uri ()).find ("https://github.com/timothyschoen/plugdata") == 0) {
+		if (Spite::has_device_face (pi)) {
 			ARDOUR::set_lv2_ui_face_height (face_height ());
 			/* the face kept from before, GUI and all, or a new one */
 			DeviceFace* face = 0;

@@ -51,6 +51,7 @@
 #include "mixer_ui.h"
 #include "recorder_ui.h"
 #include "trigger_page.h"
+#include "mcr_page.h"
 #include "keyboard.h"
 #include "keyeditor.h"
 #include "rc_option_editor.h"
@@ -135,6 +136,7 @@ ARDOUR_UI::connect_dependents_to_session (ARDOUR::Session *s)
 	mixer->set_session (s);
 	recorder->set_session (s);
 	trigger_page->set_session (s);
+	mcr_page->set_session (s);
 	meterbridge->set_session (s);
 
 	RTAManager::instance ()->set_session (s);
@@ -284,6 +286,12 @@ ARDOUR_UI::setup_windows ()
 		return -1;
 	}
 
+	/* Spite: before we_have_dependents (), which binds its actions to it */
+	if (create_mcr_page ()) {
+		error << _("UI: cannot setup the Modular Channels Rack") << endmsg;
+		return -1;
+	}
+
 	if (create_meterbridge ()) {
 		error << _("UI: cannot setup meterbridge") << endmsg;
 		return -1;
@@ -300,6 +308,10 @@ ARDOUR_UI::setup_windows ()
 	editor->add_to_notebook (_tabs);
 	recorder->add_to_notebook (_tabs);
 	trigger_page->add_to_notebook (_tabs);
+	/* Spite: the MCR stays in its tab: its live faces would be unrealized
+	 * by a detach (add_to_notebook () made the tab detachable) */
+	mcr_page->add_to_notebook (_tabs);
+	_tabs.set_tab_detachable (mcr_page->contents (), false);
 
 	top_packer.pack_start (menu_bar_base, false, false);
 
@@ -412,6 +424,8 @@ ARDOUR_UI::apply_window_settings (bool with_size)
 		_tabs.set_current_page (_tabs.page_num (recorder->contents()));
 	} else if (trigger_page && current_tab == "trigger") {
 		_tabs.set_current_page (_tabs.page_num (trigger_page->contents()));
+	} else if (mcr_page && current_tab == "mcr") {
+		_tabs.set_current_page (_tabs.page_num (mcr_page->contents ()));
 	} else if (editor) {
 		_tabs.set_current_page (_tabs.page_num (editor->contents()));
 	}

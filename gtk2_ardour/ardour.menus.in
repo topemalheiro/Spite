@@ -721,6 +721,11 @@
         <menuitem action='attach-trigger'/>
         <menuitem action='detach-trigger'/>
       </menu>
+      <menu action='MCRMenu'>
+        <menuitem action='show-mcr'/>
+        <separator/>
+        <menuitem action='play-mode'/>
+      </menu>
       <menu action='PrefsMenu'>
         <menuitem action='show-preferences'/>
         <menuitem action='hide-preferences'/>
@@ -844,6 +849,10 @@
     <menuitem action='hide-trigger'/>
     <menuitem action='attach-trigger'/>
     <menuitem action='detach-trigger'/>
+  </popup>
+
+  <popup action="mcrTabbableButtonMenu" accelerators='true'>
+    <menuitem action='show-mcr'/>
   </popup>
 
   <popup action="RulerMenuPopup" accelerators='true'>

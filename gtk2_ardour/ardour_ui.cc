@@ -188,6 +188,7 @@
 #include "timers.h"
 #include "transport_masters_dialog.h"
 #include "trigger_page.h"
+#include "mcr_page.h"
 #include "triggerbox_ui.h"
 #include "utils.h"
 #include "virtual_keyboard_window.h"
@@ -295,6 +296,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, mixer (0)
 	, recorder (0)
 	, trigger_page (0)
+	, mcr_page (0)
 	, nsm (0)
 	, _was_dirty (false)
 	, _mixer_on_top (false)
@@ -349,6 +351,7 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 	, prefs_visibility_button (S_("Window|Prefs"))
 	, recorder_visibility_button (S_("Window|Rec"))
 	, trigger_page_visibility_button (S_("Window|Cue"))
+	, mcr_page_visibility_button (S_("Window|MCR"))
 	, nsm_first_session_opened (false)
 	, _loading_session (false)
 {
@@ -863,6 +866,7 @@ ARDOUR_UI::~ARDOUR_UI ()
 		delete meterbridge; meterbridge = 0;
 		delete save_as_dialog; save_as_dialog = 0;
 		delete duplicate_routes_dialog; duplicate_routes_dialog = 0;
+		delete mcr_page; mcr_page = 0;
 		delete trigger_page; trigger_page = 0;
 		delete recorder; recorder = 0;
 		delete editor; editor = 0;

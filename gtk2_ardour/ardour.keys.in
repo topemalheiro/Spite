@@ -104,6 +104,8 @@ This mode provides many different operations on both regions and control points,
 
 %rec Recorder Recorder Page
 
+%mcr MCR Modular Channels Rack
+
 ;; END GROUP DEFINITIONS
 
 ;; punctuation
@@ -243,6 +245,7 @@ This mode provides many different operations on both regions and control points,
 @mmode|Editing/set-mouse-mode-cut|                                      c|cut mode
 @editing|Editing/editor-copy|                                <@PRIMARY@>c|copy
 @wvis|Common/show-trigger|                                <@SECONDARY@>c|show cues page
+@wvis|Common/show-mcr|                                    <@SECONDARY@>p|show modular channels rack
 @edit|Editor/editor-crop|                      <@PRIMARY@><@SECONDARY@>c|crop range
 @edit|Editor/copy-paste-section|                <@PRIMARY@><@TERTIARY@>c|copy \& paste section
 @edit|Editor/delete-section|               <@PRIMARY@><@TERTIARY@>Delete|delete section

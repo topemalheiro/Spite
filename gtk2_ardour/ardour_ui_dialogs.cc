@@ -90,6 +90,7 @@
 #include "timers.h"
 #include "transport_masters_dialog.h"
 #include "trigger_page.h"
+#include "mcr_page.h"
 #include "virtual_keyboard_window.h"
 
 #include "pbd/i18n.h"
@@ -419,6 +420,10 @@ ARDOUR_UI::step_up_through_tabs ()
 		candidates.push_back (trigger_page);
 	}
 
+	if (mcr_page && mcr_page->tabbed ()) {
+		candidates.push_back (mcr_page);
+	}
+
 	if (rc_option_editor->tabbed()) {
 		candidates.push_back (rc_option_editor);
 	}
@@ -466,6 +471,10 @@ ARDOUR_UI::step_down_through_tabs ()
 
 	if (trigger_page->tabbed()) {
 		candidates.push_back (trigger_page);
+	}
+
+	if (mcr_page && mcr_page->tabbed ()) {
+		candidates.push_back (mcr_page);
 	}
 
 	if (rc_option_editor->tabbed()) {
@@ -641,6 +650,14 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 		if (trigger_page) {
 			trigger_page->tab_btn_box ().remove ();
 		}
+		if (mcr_page) {
+			mcr_page->tab_btn_box ().remove ();
+		}
+	}
+
+	/* Spite: the MCR is always tabbed; its button lights only on its own tab */
+	if (mcr_page) {
+		mcr_page_visibility_button.set_active_state (Gtkmm2ext::Off);
 	}
 
 	//pack the tabbables selector in this tab, and set button sensitivity appropriately
@@ -752,6 +769,31 @@ ARDOUR_UI::tabs_switch (GtkNotebookPage*, guint page)
 
 		trigger_page_visibility_button.set_active_state (Gtkmm2ext::ImplicitActive);
 
+	} else if (mcr_page && page == (guint) _tabs.page_num (mcr_page->contents ())) {
+
+		mcr_page->tab_btn_box ().add (tabbables_table);
+
+		if (editor && (editor->tabbed() || editor->tabbed_by_default())) {
+			editor_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (mixer && (mixer->tabbed() || mixer->tabbed_by_default())) {
+			mixer_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (rc_option_editor && (rc_option_editor->tabbed() || rc_option_editor->tabbed_by_default())) {
+			prefs_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (recorder && (recorder->tabbed() || recorder->tabbed_by_default())) {
+			recorder_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		if (trigger_page && (trigger_page->tabbed() || trigger_page->tabbed_by_default())) {
+			trigger_page_visibility_button.set_active_state (Gtkmm2ext::Off);
+		}
+
+		mcr_page_visibility_button.set_active_state (Gtkmm2ext::ImplicitActive);
 	}
 }
 
@@ -844,6 +886,8 @@ ARDOUR_UI::tabbable_state_change (Tabbable& t)
 		vis_button = &recorder_visibility_button;
 	} else if (&t == trigger_page) {
 		vis_button = &trigger_page_visibility_button;
+	} else if (&t == mcr_page) {
+		vis_button = &mcr_page_visibility_button;
 	}
 
 	if (!vis_button) {
@@ -1115,7 +1159,7 @@ ARDOUR_UI::toggle_mixer_space()
 Tabbable*
 ARDOUR_UI::focused_tabbable ()
 {
-	Tabbable* const pages[] = { editor, mixer, trigger_page, recorder };
+	Tabbable* const pages[] = { editor, mixer, trigger_page, recorder, mcr_page };
 
 	for (Tabbable* t : pages) {
 		if (t && !t->tabbed () && t->window_visible () && t->own_window ()->property_has_toplevel_focus ()) {
@@ -1147,6 +1191,8 @@ ARDOUR_UI::shows_focused_page (std::string const& action)
 		page = trigger_page;
 	} else if (action == X_("Common/show-recorder")) {
 		page = recorder;
+	} else if (action == X_("Common/show-mcr")) {
+		page = mcr_page;
 	}
 
 	return page && page == focused_tabbable ();

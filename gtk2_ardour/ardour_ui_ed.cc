@@ -73,6 +73,7 @@
 #include "mixer_ui.h"
 #include "recorder_ui.h"
 #include "trigger_page.h"
+#include "mcr_page.h"
 #include "window_manager.h"
 #include "global_port_matrix.h"
 #include "location_ui.h"
@@ -142,6 +143,18 @@ ARDOUR_UI::create_trigger_page ()
 	return 0;
 }
 
+int
+ARDOUR_UI::create_mcr_page ()
+{
+	try {
+		mcr_page = new MCRPage ();
+		mcr_page->StateChange.connect (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_state_change));
+	} catch (failed_constructor& err) {
+		return -1;
+	}
+	return 0;
+}
+
 void
 ARDOUR_UI::escape ()
 {
@@ -181,6 +194,7 @@ ARDOUR_UI::install_actions ()
 	ActionManager::register_action (main_menu_actions, X_("PrefsMenu"), _("Preferences"));
 	ActionManager::register_action (main_menu_actions, X_("RecorderMenu"), _("Recorder"));
 	ActionManager::register_action (main_menu_actions, X_("TriggerMenu"), _("Cue Grid"));
+	ActionManager::register_action (main_menu_actions, X_("MCRMenu"), _("Modular Channels Rack"));
 	ActionManager::register_action (main_menu_actions, X_("DetachMenu"), _("Detach"));
 	ActionManager::register_action (main_menu_actions, X_("Help"), _("Help"));
 	ActionManager::register_action (main_menu_actions, X_("MacrosMenu"), _("Macros"));
@@ -789,6 +803,9 @@ ARDOUR_UI::install_dependent_actions ()
 	ActionManager::register_action (common_actions, X_("show-preferences"), _("Show"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), rc_option_editor));
 	ActionManager::register_action (common_actions, X_("show-recorder"), _("Show Recorder"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), recorder));
 	ActionManager::register_action (common_actions, X_("show-trigger"), _("Show Cues"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), trigger_page));
+	/* Spite: the MCR stays in its tab for now: hiding or detaching it would
+	 * unrealize its live faces, so it has no hide, attach or detach actions */
+	ActionManager::register_action (common_actions, X_("show-mcr"), _("Show Modular Channels Rack"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), mcr_page));
 
 	/* These "change" actions are not intended to be used inside menus, but
 	   are for the tab/window control buttons, which have somewhat odd
@@ -799,6 +816,7 @@ ARDOUR_UI::install_dependent_actions ()
 	ActionManager::register_action (common_actions, X_("change-preferences-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), rc_option_editor));
 	ActionManager::register_action (common_actions, X_("change-recorder-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), recorder));
 	ActionManager::register_action (common_actions, X_("change-trigger-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), trigger_page));
+	ActionManager::register_action (common_actions, X_("change-mcr-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::button_change_tabbable_visibility), mcr_page));
 
 	/* These "change" actions are not intended to be used inside menus, but
 	   are for the tab/window control key bindings, which have somewhat odd
@@ -809,6 +827,7 @@ ARDOUR_UI::install_dependent_actions ()
 	ActionManager::register_action (common_actions, X_("key-change-preferences-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), rc_option_editor));
 	ActionManager::register_action (common_actions, X_("key-change-recorder-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), recorder));
 	ActionManager::register_action (common_actions, X_("key-change-trigger-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), trigger_page));
+	ActionManager::register_action (common_actions, X_("key-change-mcr-visibility"), _("Change"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::key_change_tabbable_visibility), mcr_page));
 
 	ActionManager::register_action (common_actions, X_("previous-tab"), _("Previous Tab"), sigc::mem_fun (*this, &ARDOUR_UI::step_up_through_tabs));
 	ActionManager::register_action (common_actions, X_("next-tab"), _("Next Tab"), sigc::mem_fun (*this, &ARDOUR_UI::step_down_through_tabs));
@@ -1027,6 +1046,8 @@ ARDOUR_UI::save_ardour_state ()
 		current_tab = "recorder";
 	} else if (current_page_number == _tabs.page_num (trigger_page->contents())) {
 		current_tab = "trigger";
+	} else if (mcr_page && current_page_number == _tabs.page_num (mcr_page->contents())) {
+		current_tab = "mcr";
 	} else if (current_page_number == _tabs.page_num (rc_option_editor->contents())) {
 		current_tab = "preferences";
 	}
@@ -1051,6 +1072,7 @@ ARDOUR_UI::save_ardour_state ()
 	XMLNode& pnode (rc_option_editor->get_state());
 	XMLNode& rnode (recorder->get_state());
 	XMLNode& tnode (trigger_page->get_state());
+	XMLNode* mcnode = mcr_page ? &mcr_page->get_state () : 0; /* Spite: Modular Channels Rack */
 
 	/* store clock modes */
 	XMLNode* cnode = new XMLNode(X_("ClockModes"));
@@ -1079,6 +1101,9 @@ ARDOUR_UI::save_ardour_state ()
 		_session->add_instant_xml (bnode);
 		_session->add_instant_xml (rnode);
 		_session->add_instant_xml (tnode);
+		if (mcnode) {
+			_session->add_instant_xml (*mcnode);
+		}
 		_session->add_instant_xml (*cnode);
 		if (location_ui) {
 			_session->add_instant_xml (location_ui->ui().get_state ());
@@ -1103,6 +1128,9 @@ ARDOUR_UI::save_ardour_state ()
 		Config->add_instant_xml (bnode);
 		Config->add_instant_xml (rnode);
 		Config->add_instant_xml (tnode);
+		if (mcnode) {
+			Config->add_instant_xml (*mcnode);
+		}
 		Config->add_instant_xml (*cnode);
 		if (location_ui) {
 			Config->add_instant_xml (location_ui->ui().get_state ());
@@ -1124,6 +1152,7 @@ ARDOUR_UI::save_ardour_state ()
 	delete &pnode;
 	delete &rnode;
 	delete &tnode;
+	delete mcnode;
 	delete cnode;
 
 	Keyboard::save_keybindings ();
@@ -1156,6 +1185,9 @@ ARDOUR_UI::focus_on_clock ()
 	}
 	if (trigger_page->tabbed() && _tabs.get_current_page() == _tabs.page_num (trigger_page->contents())) {
 		trigger_page->focus_on_clock ();
+	}
+	if (mcr_page && mcr_page->tabbed () && _tabs.get_current_page () == _tabs.page_num (mcr_page->contents ())) {
+		mcr_page->focus_on_clock ();
 	}
 }
 
