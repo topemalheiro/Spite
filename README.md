@@ -159,7 +159,7 @@ cmake --install build --prefix ~/.local
 
 The build puts the plugdata app and its plugins in `plugdata/Plugins`. On Linux, the last step copies the VST3 and LV2 plugins to `~/.vst3` and `~/.lv2`, where Spite finds them, and the app to `~/.local/bin/plugdata`; then use Scan for Plugins in Spite's Preferences, under Plugins. On macOS and Windows, `cmake --install` puts them in the system's plugin folders, which needs admin rights.
 
-### Max for Live (M4L) as PlugData for Spire devices (PgD4S)
+### Max for Live (M4L) as PlugData for Spite devices (PgD4S)
 
 `tools/m4l/m4l2pd.py` turns Max for Live devices (`.amxd` files) into plugdata for Spite (PgD4S) devices. It needs only Python 3, and PgD4S built as above. To convert devices and install them:
 
