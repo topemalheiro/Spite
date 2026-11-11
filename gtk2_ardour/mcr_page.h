@@ -37,9 +37,9 @@
  * page's Device view, on a plugdata-like canvas where cables will go between them.
  * Its Patch and Play modes are plugdata's edit and run modes.
  *
- * It stays in its tab for now: detaching, attaching or hiding it would unrealize the
- * live faces it is to show, so it has no such actions, and set_state () leaves
- * Tabbable's own state (which can open a window) alone. */
+ * Like the other pages it can be hidden, or detached into a window of its own and
+ * attached again; each of those unrealizes the page, so its live faces are made
+ * again afterwards. */
 class MCRPage : public ArdourWidgets::Tabbable, public ARDOUR::SessionHandlePtr
 {
 public:

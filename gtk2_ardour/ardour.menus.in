@@ -723,6 +723,9 @@
       </menu>
       <menu action='MCRMenu'>
         <menuitem action='show-mcr'/>
+        <menuitem action='hide-mcr'/>
+        <menuitem action='attach-mcr'/>
+        <menuitem action='detach-mcr'/>
         <separator/>
         <menuitem action='play-mode'/>
       </menu>
@@ -853,6 +856,9 @@
 
   <popup action="mcrTabbableButtonMenu" accelerators='true'>
     <menuitem action='show-mcr'/>
+    <menuitem action='hide-mcr'/>
+    <menuitem action='attach-mcr'/>
+    <menuitem action='detach-mcr'/>
   </popup>
 
   <popup action="RulerMenuPopup" accelerators='true'>

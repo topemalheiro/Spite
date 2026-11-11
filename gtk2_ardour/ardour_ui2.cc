@@ -198,7 +198,7 @@ ARDOUR_UI::setup_transport ()
 	prefs_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("preferences")), false);
 	recorder_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("recorder")), false);
 	trigger_page_visibility_button.signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("trigger")), false);
-	/* Spite: no drag_failed for the MCR's button: dragging it off would detach it */
+	mcr_page_visibility_button.signal_drag_failed ().connect (sigc::bind (sigc::ptr_fun (drag_failed), mcr_page));
 	mcr_page_visibility_button.signal_button_press_event ().connect (sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::tabbable_visibility_button_press), X_("mcr")), false);
 
 	/* setup widget style/name */

@@ -803,9 +803,11 @@ ARDOUR_UI::install_dependent_actions ()
 	ActionManager::register_action (common_actions, X_("show-preferences"), _("Show"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), rc_option_editor));
 	ActionManager::register_action (common_actions, X_("show-recorder"), _("Show Recorder"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), recorder));
 	ActionManager::register_action (common_actions, X_("show-trigger"), _("Show Cues"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), trigger_page));
-	/* Spite: the MCR stays in its tab for now: hiding or detaching it would
-	 * unrealize its live faces, so it has no hide, attach or detach actions */
+	/* Spite: the Modular Channels Rack; detaching or hiding it unrealizes the page, so its live faces are made again */
 	ActionManager::register_action (common_actions, X_("show-mcr"), _("Show Modular Channels Rack"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::show_tabbable), mcr_page));
+	ActionManager::register_action (common_actions, X_("hide-mcr"), _("Hide"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::hide_tabbable), mcr_page));
+	ActionManager::register_action (common_actions, X_("attach-mcr"), _("Attach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::attach_tabbable), mcr_page));
+	ActionManager::register_action (common_actions, X_("detach-mcr"), _("Detach"), sigc::bind (sigc::mem_fun (*this, &ARDOUR_UI::detach_tabbable), mcr_page));
 
 	/* These "change" actions are not intended to be used inside menus, but
 	   are for the tab/window control buttons, which have somewhat odd

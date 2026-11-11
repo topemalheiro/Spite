@@ -308,10 +308,7 @@ ARDOUR_UI::setup_windows ()
 	editor->add_to_notebook (_tabs);
 	recorder->add_to_notebook (_tabs);
 	trigger_page->add_to_notebook (_tabs);
-	/* Spite: the MCR stays in its tab: its live faces would be unrealized
-	 * by a detach (add_to_notebook () made the tab detachable) */
 	mcr_page->add_to_notebook (_tabs);
-	_tabs.set_tab_detachable (mcr_page->contents (), false);
 
 	top_packer.pack_start (menu_bar_base, false, false);
 

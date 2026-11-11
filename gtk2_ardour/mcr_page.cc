@@ -143,17 +143,18 @@ XMLNode&
 MCRPage::get_state () const
 {
 	XMLNode* node = new XMLNode (X_("MCRPage"));
+	node->add_child_nocopy (Tabbable::get_state ()); /* tabbed or in its own window */
 	node->set_property (X_("play-mode"), _play_action->get_active ());
 	return *node;
 }
 
 int
-MCRPage::set_state (const XMLNode& node, int /* version */)
+MCRPage::set_state (const XMLNode& node, int version)
 {
-	/* not Tabbable::set_state (): it would open the page in a window of its own */
 	bool play;
 	if (node.get_property (X_("play-mode"), play)) {
 		_play_action->set_active (play);
 	}
-	return 0;
+	/* opens the page in its own window again if it was detached and shown */
+	return Tabbable::set_state (node, version);
 }
