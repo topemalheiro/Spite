@@ -37,7 +37,7 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 
 **After that:**
 
-- **An automation/MIDI editing window/view tied to step sequencers.**
+- **An automation/MIDI editing window/view tied to step sequencer control surfaces. With multiple clip and paramter editing(simultaneously).**
 - **Presets within reach.** Preset slots beside each device that a control-surface button can fire, and a coloured box showing what a control surface has mapped.
 - **Macro knobs.** One knob driving many parameters, each with its own range and curve.
 - **Knobs that offset automation.** Recorded modulation (generative patches, LFOs and the modulators driving them) plays back from automation lines, and a control surface offsets it live without switching it off.
