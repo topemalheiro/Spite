@@ -15,7 +15,7 @@ Spite is a clone of [Ardour](https://ardour.org/), not a fork meant to track it 
 Spite started from Ardour 9 on October 27, 2026. What's done since:
 
 - **Its own identity.** A new name, logo and launcher. `./install-spite.sh` installs it under `~/.local`, apart from any Ardour, with its own settings.
-- **plugdata inside.** plugdata, the visual patching environment based on Pure Data, is part of the source as a submodule. Spite's plugdata fork adds Detective Mode: messages travel along the cables as bubbles, in the order they run and at an adjustable speed, so you can debug a patch by watching it.
+- **plugdata inside.** plugdata, the visual patching environment based on Pure Data, is part of the source as a submodule: [PgD4S, plugdata for Spite](https://github.com/topemalheiro/PgD4S), Spite's own build of plugdata in its own repo. It adds Detective Mode: messages travel along the cables as bubbles, in the order they run and at an adjustable speed, so you can debug a patch by watching it.
 - **Window and panel shortcuts.** Ctrl+Alt+F makes the focused page fullscreen, detached windows included. Ctrl+Alt+L shows or hides its bottom panel, like Live's detail view.
 - **A plugin browser on either side.** The Cue, Edit and Mixer pages each have a browser with favourite, recent and searched plugins and their presets. Drag a plugin onto a strip's devices, or double-click it to add it to the selected tracks. On the Cue page, dropping an instrument on the empty strip area makes a MIDI track with it. Ctrl+Alt+B shows or hides the browser, and a setting puts it on the left, like Live's, or on the right.
 - **Action macros.** A Macros menu and a Macro Editor. A macro runs a chain of actions from a key, the menu or a control surface, and you can record one just by doing the actions. There's no limit on how many, and they come in sets you can switch between. Every existing shortcut is listed and editable in the same place. A key can work everywhere or on one page only, and a macro can cycle, running one step per press, so a single key can step through pages or layouts.
@@ -54,7 +54,7 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 
 ## Build and run
 
-Spite is written in C++17 on Ardour's code base, with Ardour's own copy of the GTK2 toolkit (in `libs/tk`), the waf build system and Lua scripting. plugdata, in the `plugdata` folder, is a separate C++ project built with CMake, on JUCE and Pure Data. Spite builds the way Ardour does, so Ardour's guides at <https://ardour.org/development.html> apply too.
+Spite is written in C++17 on Ardour's code base, with Ardour's own copy of the GTK2 toolkit (in `libs/tk`), the waf build system and Lua scripting. PgD4S (plugdata for Spite), in the `plugdata` folder, is a separate C++ project built with CMake, on JUCE and Pure Data. Spite builds the way Ardour does, so Ardour's guides at <https://ardour.org/development.html> apply too.
 
 Install git and your system's build dependencies first, as shown for each system below. Then clone the repository. Spite reads its version from git, so clone it instead of downloading a ZIP, and don't make a shallow clone:
 
@@ -145,9 +145,9 @@ Start it from the same shell, because from File Explorer it can't find MSYS2's l
 
 Automated builds on macOS and Windows are next, so these two sections can be checked and fixed.
 
-### plugdata with Detective Mode
+### PgD4S (plugdata for Spite)
 
-plugdata builds on Linux, macOS and Windows with CMake 3.22 or newer, and a fresh clone of it builds on Linux as shown here. Its dependencies and options are in [plugdata's README](https://github.com/topemalheiro/plugdata/blob/debug-mode-visualizer/README.md). A quick build, which skips sfizz, Gem and ffmpeg:
+PgD4S, Spite's build of plugdata, builds on Linux, macOS and Windows with CMake 3.22 or newer, and a fresh clone of it builds on Linux as shown here. Its dependencies and options are in [PgD4S's README](https://github.com/topemalheiro/PgD4S/blob/main/README.md). A quick build, which skips sfizz, Gem and ffmpeg:
 
 ```sh
 git submodule update --init --recursive
