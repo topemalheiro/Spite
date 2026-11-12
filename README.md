@@ -54,7 +54,7 @@ Most of it is about live performance on the Cue page, Spite's counterpart to Liv
 
 ## Build and run
 
-Spite is written in C++17 on Ardour's code base, with Ardour's own copy of the GTK2 toolkit (in `libs/tk`), the waf build system and Lua scripting. PgD4S (plugdata for Spite), in the `plugdata` folder, is a separate C++ project built with CMake, on JUCE and Pure Data. Spite builds the way Ardour does, so Ardour's guides at <https://ardour.org/development.html> apply too.
+Spite is written in C++17 on Ardour's code base, with Ardour's own copy of the GTK2 toolkit (in `libs/tk`), the waf build system and Lua scripting. PgD4S (plugdata for Spite), in the `PgD4S` folder, is a separate C++ project built with CMake, on JUCE and Pure Data. Spite builds the way Ardour does, so Ardour's guides at <https://ardour.org/development.html> apply too.
 
 Install git and your system's build dependencies first, as shown for each system below. Then clone the repository. Spite reads its version from git, so clone it instead of downloading a ZIP, and don't make a shallow clone:
 
@@ -151,13 +151,13 @@ PgD4S, Spite's build of plugdata, builds on Linux, macOS and Windows with CMake 
 
 ```sh
 git submodule update --init --recursive
-cd plugdata
+cd PgD4S
 cmake -B build -DQUICK_BUILD=1
 cmake --build build --parallel 8
 cmake --install build --prefix ~/.local
 ```
 
-The build puts the plugdata app and its plugins in `plugdata/Plugins`. On Linux, the last step copies the VST3 and LV2 plugins to `~/.vst3` and `~/.lv2`, where Spite finds them, and the app to `~/.local/bin/plugdata`; then use Scan for Plugins in Spite's Preferences, under Plugins. On macOS and Windows, `cmake --install` puts them in the system's plugin folders, which needs admin rights.
+The build puts the plugdata app and its plugins in `PgD4S/Plugins`. On Linux, the last step copies the VST3 and LV2 plugins to `~/.vst3` and `~/.lv2`, where Spite finds them, and the app to `~/.local/bin/plugdata`; then use Scan for Plugins in Spite's Preferences, under Plugins. On macOS and Windows, `cmake --install` puts them in the system's plugin folders, which needs admin rights.
 
 ### Max for Live (M4L) as PlugData for Spite devices (PgD4S)
 

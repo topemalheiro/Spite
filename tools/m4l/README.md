@@ -11,7 +11,7 @@ python3 tools/m4l/m4l2pd.py "My Device.amxd" out/
 python3 tools/m4l/m4l2pd.py --install ~/Music/Devices/*.amxd
 ```
 
-In Spite, add **PgD4S-fx** (for audio effects) or **PgD4S** (for instruments and MIDI effects) to a track. PgD4S is plugdata for Spite, built from the `plugdata` submodule. Then pick **M4L: <device name>** from the plugin's presets. On the Cue page, the Device view (Tab) shows the device's face, as Live does, and double-clicking its title bar opens the patch. To build the plugins, link `plugdata/Plugins/LV2/PgD4S.lv2` and `PgD4S-fx.lv2` into `~/.lv2`.
+In Spite, add **PgD4S-fx** (for audio effects) or **PgD4S** (for instruments and MIDI effects) to a track. PgD4S is plugdata for Spite, built from the `PgD4S` submodule. Then pick **M4L: <device name>** from the plugin's presets. On the Cue page, the Device view (Tab) shows the device's face, as Live does, and double-clicking its title bar opens the patch. To build the plugins, link `PgD4S/Plugins/LV2/PgD4S.lv2` and `PgD4S-fx.lv2` into `~/.lv2`.
 
 ## What converts
 

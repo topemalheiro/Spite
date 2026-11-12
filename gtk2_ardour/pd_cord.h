@@ -20,7 +20,7 @@
  *
  * Ported from plugdata (Connection.cpp, Iolet.cpp, Object.cpp, Canvas.cpp) and
  * from what its nanovg cable shader draws (nanovg_gl.h, the double stroke). Line
- * numbers refer to the plugdata fork in plugdata/Source.
+ * numbers refer to PgD4S, in PgD4S/Source.
  *
  * Everything is in canvas units, with cr already scaled by the canvas zoom, as
  * plugdata draws. GUI thread only.
@@ -356,7 +356,7 @@ private:
 
 /* ---- text ---- */
 
-/* plugdata's font is Inter (InterRegular.ttf, plugdata/Resources/Fonts), and the family
+/* plugdata's font is Inter (InterRegular.ttf, PgD4S/Resources/Fonts), and the family
  * is "Inter, Sans" so that it falls back where Spite's system has no Inter. load_font_file ()
  * adds a font file for the cords' text alone (their own fontconfig set; the rest of Spite's
  * fonts stay as they are), false where it can't (macOS) or the file isn't a font. */

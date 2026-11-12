@@ -80,7 +80,7 @@
 using namespace ARDOUR;
 using ArdourCanvas::Rect;
 
-/* plugdata's dark theme (plugdata/Source/LookAndFeel.cpp) */
+/* plugdata's dark theme (PgD4S/Source/LookAndFeel.cpp) */
 static Gtkmm2ext::Color const canvas_bg      = 0x232323ff; /* canvas_background */
 static Gtkmm2ext::Color const grid_dots      = 0x6c6c6cff; /* canvas_dots (7f7f7f), a fifth of the way to the background */
 static Gtkmm2ext::Color const canvas_text    = 0xe1e1e1ff; /* canvas_text */

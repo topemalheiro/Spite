@@ -1,4 +1,4 @@
 [submodule "plugdata"]
-	path = plugdata
+	path = PgD4S
 	url = https://github.com/topemalheiro/PgD4S.git
 	branch = main

@@ -1051,7 +1051,7 @@ def build(bld):
 
     # Spite: plugdata's font (Inter), for the MCR's cables and Detective Mode. Copied next to
     # the binary, so a run from the build finds it on the data path too.
-    inter = bld.path.find_resource('../plugdata/Resources/Fonts/InterRegular.ttf')
+    inter = bld.path.find_resource('../PgD4S/Resources/Fonts/InterRegular.ttf')
     if inter:
         bld(rule = 'cp ${SRC} ${TGT}', source = inter, target = 'InterRegular.ttf', install_path = bld.env['DATADIR'])
 

@@ -38,7 +38,7 @@
 
 using PdCord::Rect;
 
-/* plugdata's dark theme (plugdata/Source/LookAndFeel.cpp, "dark") */
+/* plugdata's dark theme (PgD4S/Source/LookAndFeel.cpp, "dark") */
 static Gtkmm2ext::Color const toolbar_background = 0x191919ff; /* toolbar_background */
 static Gtkmm2ext::Color const toolbar_hover      = 0x282828ff; /* toolbar_hover */
 static Gtkmm2ext::Color const toolbar_outline    = 0x2f2f2fff; /* toolbar_outline_colour */

@@ -40,7 +40,7 @@
 
 using namespace ARDOUR;
 
-/* plugdata's dark theme (plugdata/Source/LookAndFeel.cpp) */
+/* plugdata's dark theme (PgD4S/Source/LookAndFeel.cpp) */
 static Gtkmm2ext::Color const card_bg       = 0x191919ff; /* default_object_background */
 static Gtkmm2ext::Color const title_bg      = 0x2c2c2cff; /* panel_background */
 static Gtkmm2ext::Color const outline       = 0x555555ff; /* object_outline_colour */
