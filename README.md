@@ -24,6 +24,30 @@ Spite started from Ardour 9 on October 27, 2026. What's done since:
 - **The Modular Channels Rack (MCR).** A new window, opened with the MCR button next to Rec, Edit, Cue and Mix, or Alt+P, and detachable like them. Every track's devices sit in rows, one row per track, in plugdata's look: plugdata for Spite devices show their live faces, and other plugins get a card. In Patch mode (Ctrl+E), drag a cable from a device's output to a device on another track. Cables are drawn over the live faces, audio and MIDI arrive in the same buffer, loops are refused, and jacks move to the edge facing their cable. Slivers between the rows open for patching and close to small labels, by mouse or from a macro. plugdata's Detective Mode shows the MIDI and levels travelling along the cables, with speed, pause, step and a history. Right-click a device for "Edit in plugdata for Spite", its generic controls, or turning it off or on; the faces in the Device view have the same menu.
 - **Max for Live devices as PlugData for Spite devices.** A converter turns `.amxd` devices into plugdata patches with Live's controls and the device's own face, installed as presets Spite's plugin browser lists (see [Max for Live devices](#max-for-live-m4l-as-plugdata-for-spite-devices-pgd4s)).
 
+## Install
+
+To clone Spite, build it yourself or work on it, skip this section and scroll down to [Build and run](#build-and-run).
+
+Otherwise, download Spite ready to run, with nothing to clone or build. The download is for 64-bit Linux, includes PgD4S (plugdata for Spite), and installs for your user only, so it needs no root access. It runs on Ubuntu 24.04, Debian 13, Fedora and Arch, and on other distributions at least as new. In a terminal:
+
+```sh
+curl -fL https://github.com/topemalheiro/Spite/releases/latest/download/Spite-linux-x86_64.tar.xz | tar -xJ
+cd Spite-linux-x86_64
+./install.sh
+```
+
+Then open Spite from your application menu, or run `spite9`. Once it's installed, you can delete the `Spite-linux-x86_64` folder. The same file is on the [Releases page](https://github.com/topemalheiro/Spite/releases/latest).
+
+- **Where it goes:** the program into `~/.local/opt/spite9`, its commands into `~/.local/bin`, and your settings into `~/.config/spite9`.
+- **To try it without installing,** skip `./install.sh` and run `./bin/spite9` in the extracted folder.
+- **To update,** run the same three commands again.
+- **To uninstall,** run `~/.local/opt/spite9/uninstall.sh`. Your settings and sessions stay.
+- **Max for Live devices:** the download includes the converter as the command `spite9-m4l2pd` (see [Max for Live devices](#max-for-live-m4l-as-plugdata-for-spite-devices-pgd4s)).
+
+At its first start, Spite may warn about a limit on locked memory. That's the usual setup for realtime audio: joining your distribution's `audio` or `realtime` group lifts it.
+
+There's no download for macOS or Windows yet. On those, build Spite as shown below.
+
 ## Roadmap
 
 Most of it is about live performance on the Cue page, Spite's counterpart to Live's Session View.
@@ -107,6 +131,8 @@ python3 ./waf -j"$(nproc)"
 
 After `./install-spite.sh`, `./gtk2_ardour/ardev` works on its own. To uninstall, run `python3 ./waf uninstall` in the clone, then `rm ~/.local/share/applications/spite9.desktop ~/.local/share/icons/hicolor/*/apps/spite9.png`. Your settings stay in `~/.config/spite9`.
 
+The [download](#install) is made from this same source by `tools/linux_download/make-download.sh`. How it's built, tested and published is in [tools/linux_download/README.md](tools/linux_download/README.md).
+
 ### macOS (not yet tested with Spite)
 
 Ardour's macOS guide, <https://ardour.org/building_osx_native.html>, builds the dependencies from source. Homebrew has them too, though Ardour doesn't support building with it. This route is untested; for JACK and control surfaces, add `jack libusb libwebsockets` to the `brew install` line:
@@ -166,6 +192,8 @@ The build puts the plugdata app and its plugins in `PgD4S/Plugins`. On Linux, th
 ```sh
 python3 tools/m4l/m4l2pd.py --install ~/Music/Devices/*.amxd
 ```
+
+With the [download](#install), run the same converter as `spite9-m4l2pd`, for example `spite9-m4l2pd --install ~/Music/Devices/*.amxd`.
 
 The patches go to `~/.local/share/spite9/m4l/`, and each device becomes a preset in `~/.lv2/spite-m4l.lv2/`. Restart Spite, then:
 
