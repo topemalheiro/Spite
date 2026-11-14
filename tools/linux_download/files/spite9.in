@@ -29,8 +29,8 @@ if command -v pipewire >/dev/null 2>&1; then
 fi
 
 if [ "$(ulimit -l)" != "unlimited" ]; then
-	echo "Spite: your system limits how much memory a program may lock, which realtime audio needs."
-	echo "       Joining your distribution's 'audio' or 'realtime' group usually lifts the limit."
+	echo "Spite: your system limits how much memory a program may lock, which realtime audio needs." >&2
+	echo "       Joining your distribution's 'audio' or 'realtime' group usually lifts the limit." >&2
 fi
 
 case "${1:-}" in

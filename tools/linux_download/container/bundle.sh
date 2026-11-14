@@ -10,7 +10,7 @@ B=$OUT/$NAME
 FILES=/release/files
 [ -d "$STAGE/lib/spite9" ] || { echo "bundle: no build in /work/stage, run build.sh first" >&2; exit 1; }
 
-rm -rf "${B:?}" "$OUT/$NAME.tar.xz" "$OUT/$NAME.tar.xz.sha256" "$OUT/release-notes.md"
+rm -rf "${B:?}" "$OUT/$NAME.tar.xz" "$OUT/$NAME.tar.xz.sha256" "$OUT/release-notes.md" "$OUT/release.env"
 mkdir -p "$B/bin" "$B/share/doc"
 
 # Spite's installed files, one level up: lib/spite9 -> lib, share/spite9 -> share, etc/spite9 -> etc.
@@ -71,6 +71,13 @@ install -m 644 "$FILES/paths.sh" "$B/lib/fallback/paths.sh"
 		fi
 	done
 } > "$B/share/doc/bundled-libraries.txt"
+
+# The program must report the version it's packed as (see the clean build in build.sh)
+reported=$("$B/bin/spite9" --version 2>/dev/null | grep -o "^Spite[0-9][0-9.]*" || true)
+if [ "$reported" != "Spite$version" ]; then
+	echo "bundle: the program reports '$reported', but this is Spite$version. Remove /work/src/Spite/build and build again." >&2
+	exit 1
+fi
 
 # The top level: install, uninstall, readme, licences, version
 spite_commit=$(git -C "$SRC" rev-parse HEAD)

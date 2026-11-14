@@ -28,6 +28,11 @@ while IFS= read -r -d '' f; do
 done < <(find . -type f -print0)
 if [ -s /log/ldd-missing.txt ]; then bad "$(sort -u -t: -k2 /log/ldd-missing.txt | head -20)"; else ok "$n programs and libraries, nothing missing"; fi
 
+step "the program reports the download's version"
+packed=$(head -1 ~/.local/opt/spite9/VERSION | grep -o '^Spite [0-9.]*' | tr -d ' ')
+reported=$(~/.local/bin/spite9 --version 2>/dev/null | grep -o '^Spite[0-9][0-9.]*')
+if [ -n "$packed" ] && [ "$reported" = "$packed" ]; then ok "$reported"; else bad "packed as '$packed', but the program says '$reported'"; fi
+
 step "PgD4S in a session, without a screen"
 if TEST_SESSION_DIR=$HOME/test-session timeout 180 ~/.local/bin/spite9-lua /tests/headless.lua > /log/headless.log 2>&1 \
 	&& grep -q '^STEP DONE' /log/headless.log; then

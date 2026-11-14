@@ -11,7 +11,7 @@ tools/linux_download/make-download.sh     # builds the public repository's maste
 tools/linux_download/test-download.sh     # installs and checks it on five clean systems
 ```
 
-`make-download.sh` clones Spite from GitHub with every submodule, so it builds what users get, not your working copy. Give it a branch, a tag or a commit to build something else. The first run downloads the sources and compiles for about 15 minutes with 12 jobs. Later runs only rebuild what changed, and `make-download.sh --pack` packs the last build again without compiling.
+`make-download.sh` clones Spite from GitHub with every submodule, so it builds what users get, not your working copy. Give it a branch, a tag or a commit to build something else. The first run downloads the sources and compiles for about 15 minutes with 12 jobs. After that, each new commit gets a clean build of Spite (about 4 minutes), because Spite's build doesn't recompile the files that show the version when only the version changes. PgD4S only rebuilds what changed. `make-download.sh --pack` packs the last build again without compiling.
 
 Everything it makes goes to `~/.cache/spite-download`. Set `SPITE_DOWNLOAD_WORK` to use another folder.
 
@@ -26,13 +26,14 @@ Everything it makes goes to `~/.cache/spite-download`. Set `SPITE_DOWNLOAD_WORK`
 
 1. extracts the download and runs `install.sh`;
 2. checks that every program and library in it finds the libraries it needs;
-3. makes a session without a screen, loads PgD4S and PgD4S-fx on tracks, runs it for 3 seconds and saves it;
-4. runs the Max for Live converter;
-5. starts Spite on a virtual screen and takes a screenshot;
-6. checks that `install.sh` and `uninstall.sh` refuse to run while Spite is open;
-7. installs again over the first install, as an update;
-8. checks that `install.sh` won't replace a Spite built from source unless it's given `--force`;
-9. runs `uninstall.sh`.
+3. checks that the program reports the version the download was packed as;
+4. makes a session without a screen, loads PgD4S and PgD4S-fx on tracks, runs it for 3 seconds and saves it;
+5. runs the Max for Live converter;
+6. starts Spite on a virtual screen and takes a screenshot;
+7. checks that `install.sh` and `uninstall.sh` refuse to run while Spite is open;
+8. installs again over the first install, as an update;
+9. checks that `install.sh` won't replace a Spite built from source unless it's given `--force`;
+10. runs `uninstall.sh`.
 
 The containers have no sound card and no graphics card. Sound, and PgD4S's windows on a real graphics card, need a test on a real desktop.
 
