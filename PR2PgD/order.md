@@ -7,7 +7,7 @@
 | 3    | **PR'd:** [JUCE #8](https://github.com/plugdata-team/JUCE/pull/8) | JUCE: Linux maximize                                                      | [juceMaximize101](juceMaximize101.md)         | Spite 2 | nothing | anything that needs nothing        |
 | 4    | not sent, stays here | plugdata: add an "Oval outline" option to [button]                        | [ovalButton101](ovalButton101.md)             | Spite 3 | 14      | 11, 12, 13 and 16, once 14 is open |
 | 5    | **PR'd:** [plugdata #2426](https://github.com/plugdata-team/plugdata/pull/2426) | plugdata: fix popup menu text running under its arrows                    | [popupMenu101](popupMenu101.md)               | Spite 3 | nothing | anything that needs nothing        |
-| 6    | **PR'd:** [plugdata #2427](https://github.com/plugdata-team/plugdata/pull/2427) | plugdata: fix centred and right-aligned text in fixed-width notes         | [noteAlignment101](noteAlignment101.md)       | Spite 3 | nothing | anything that needs nothing        |
+| 6    | **PR'd:** [plugdata #2427](https://github.com/plugdata-team/plugdata/pull/2427) | plugdata: fix centred and right-aligned text in fixed-width notes (+ #2435) | [noteAlignment101](noteAlignment101.md)       | Spite 3 | nothing | anything that needs nothing        |
 | 7    | **PR'd:** [plugdata #2428](https://github.com/plugdata-team/plugdata/pull/2428) | plugdata: fix Inspector choices not applying when selected objects differ | [inspectorChoices101](inspectorChoices101.md) | Spite 3 | nothing | anything that needs nothing        |
 | 8    | **PR'd:** [plugdata #2429](https://github.com/plugdata-team/plugdata/pull/2429) | plugdata: draw read-only knobs greyed out                                 | [readonlyKnob101](readonlyKnob101.md)         | Spite 3 | nothing | anything that needs nothing        |
 | 9    | **PR'd:** [plugdata #2430](https://github.com/plugdata-team/plugdata/pull/2430) | plugdata: Lua link flags                                                  | [luaFlags101](luaFlags101.md)                 | Spite 4 | nothing | anything that needs nothing        |
@@ -21,6 +21,8 @@
 | 17   | **PR'd:** [JUCE #9](https://github.com/plugdata-team/JUCE/pull/9) | JUCE: Wayland popups start with their window's scale (tiny dropdowns)     | [popupScale101](popupScale101.md)             | Spite 2 | nothing | anything that needs nothing        |
 
 **PR'd (2026-11-14):** 13 of the 17 were opened upstream that day: 1 to 3, 5 to 13 and 17. The links are in the table. 4, 14, 15 and 16 (the "Oval outline" option and the knob's "Style", with their ELSE halves) were not sent. They stay in your own plugdata (the fork's `main`) and can be sent later.
+
+**15 November, PR 6:** Timothy found that a note that wasn't resized still lets right-aligned text run past its box (it was like that before too). The fix for that is a separate, optional PR, [plugdata #2435](https://github.com/plugdata-team/plugdata/pull/2435): #2427 plus one commit (2b308344f). Timothy said he's restructuring this himself, so #2427 stays exactly as he tested it. Your plugdata (`main`) and PgD4S already have the fix.
 
 **The folder for Timothy:** [PRs-for-Timothy](PRs-for-Timothy/README.md) holds his copy of this list and of the 13 notes: no Python lines, no C lessons, and code links that open on GitHub. There the JUCE dropdown fix (17 here) is number 4, so his list runs 1 to 13; all the others keep their numbers.
 
