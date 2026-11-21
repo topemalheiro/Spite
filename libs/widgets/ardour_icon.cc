@@ -41,39 +41,32 @@ using namespace ArdourWidgets::ArdourIcon;
 
 #define OUTLINEWIDTH 1.5 // px
 
-#define VECTORICONSTROKEFILLFG(fillalpha)             \
-  cairo_set_line_width (cr, OUTLINEWIDTH);          \
-  cairo_set_source_rgba (cr, 0, 0, 0, 1.0);         \
-  cairo_stroke_preserve (cr);                       \
-  Gtkmm2ext::set_source_rgba (cr, fg_color);        \
+/* Spite: icons are flat glyphs in the theme's text colour, no contrasting outline (plugdata's icon
+ * font has none either). The macros keep their names and call sites; only the drawing changed. */
+
+#define VECTORICONSTROKEFILLFG(fillalpha)         \
+  Gtkmm2ext::set_source_rgba (cr, fg_color);      \
   cairo_fill (cr);
 
-#define VECTORICONSTROKEFILL(fillalpha)             \
-  cairo_set_line_width (cr, OUTLINEWIDTH);          \
-  cairo_set_source_rgba (cr, 0, 0, 0, 1.0);         \
-  cairo_stroke_preserve (cr);                       \
-  cairo_set_source_rgba (cr, 1, 1, 1, (fillalpha)); \
+#define VECTORICONSTROKEFILL(fillalpha)                          \
+  cairo_set_source_rgba (cr, .88, .88, .88, (fillalpha));        \
   cairo_fill (cr);
 
 #define VECTORICONOUTLINEFILL(color)             \
   cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND); \
-  cairo_set_line_width (cr, OUTLINEWIDTH);       \
-  ardour_icon_set_source_inv_rgba (cr, color);   \
-  cairo_stroke_preserve (cr);                    \
   Gtkmm2ext::set_source_rgba (cr, color);        \
   cairo_fill (cr);
 
 #define VECTORICONSTROKEOUTLINE(LW, color)        \
   cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);  \
-  cairo_set_line_width (cr, (LW) + OUTLINEWIDTH); \
-  ardour_icon_set_source_inv_rgba (cr, color);    \
-  cairo_stroke_preserve (cr);                     \
+  cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND); \
   Gtkmm2ext::set_source_rgba (cr, color);         \
   cairo_set_line_width (cr, (LW));                \
   cairo_stroke (cr);
 
 #define VECTORICONSTROKE(LW, color)              \
   cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND); \
+  cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND); \
   Gtkmm2ext::set_source_rgba (cr, color);        \
   cairo_set_line_width (cr, (LW));               \
   cairo_stroke (cr);
@@ -328,9 +321,9 @@ icon_tool_stretch (cairo_t* cr, const int width, const int height)
 	cairo_line_to (cr, x0 - lw * 2, y + lw * 3.5);
 	cairo_line_to (cr, x0 - lw * 2, y);
 
-	cairo_set_source_rgba (cr, 0, 0, 0, .5);
+	cairo_set_source_rgba (cr, .14, .14, .14, .5);
 	cairo_stroke_preserve (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_fill (cr);
 
 	// outside/right arrow
@@ -341,7 +334,7 @@ icon_tool_stretch (cairo_t* cr, const int width, const int height)
 	cairo_line_to (cr, x0 + lw * 2, y + lw * 4);
 	cairo_line_to (cr, x0 + lw * 2, y);
 
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_stroke_preserve (cr);
 	cairo_set_source_rgba (cr, 1, 1, 1, 1.0);
 	cairo_fill (cr);
@@ -376,7 +369,7 @@ icon_tool_audition (cairo_t* cr, const int width, const int height)
 	cairo_set_line_cap (cr, CAIRO_LINE_CAP_BUTT);
 	cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND);
 	cairo_set_line_width (cr, 1.5);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_stroke_preserve (cr);
 	cairo_set_source (cr, speaker);
 	cairo_fill (cr);
@@ -386,7 +379,7 @@ icon_tool_audition (cairo_t* cr, const int width, const int height)
 	cairo_move_to (cr, EM_POINT (-3.0, -3.0));
 	cairo_line_to (cr, EM_POINT (-3.5,  0.0));
 	cairo_line_to (cr, EM_POINT (-3.0,  3.0));
-	cairo_set_source_rgba (cr, 0, 0, 0, 0.7);
+	cairo_set_source_rgba (cr, .14, .14, .14, 0.7);
 	cairo_set_line_width (cr, 1.0);
 	cairo_stroke (cr);
 
@@ -441,7 +434,7 @@ icon_tool_draw (cairo_t* cr, const int width, const int height)
 	cairo_set_line_cap (cr, CAIRO_LINE_CAP_BUTT);
 	cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND);
 	cairo_set_line_width (cr, em + .5);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_stroke_preserve (cr);
 	cairo_set_source (cr, pen);
 	cairo_fill (cr);
@@ -451,7 +444,7 @@ icon_tool_draw (cairo_t* cr, const int width, const int height)
 	cairo_line_to (cr, EM_POINT (-3.0, 2.8)); // slight curve [-3,3]
 	cairo_line_to (cr, EM_POINT (-4.0, 2.0));
 	cairo_set_line_width (cr, OUTLINEWIDTH);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_set_line_cap (cr, CAIRO_LINE_CAP_BUTT);
 	cairo_stroke (cr);
 
@@ -460,7 +453,7 @@ icon_tool_draw (cairo_t* cr, const int width, const int height)
 	cairo_line_to (cr, EM_POINT (-6.0, 5.66));
 	cairo_line_to (cr, EM_POINT (-4.1, 4.9));
 	cairo_close_path (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 0.7);
+	cairo_set_source_rgba (cr, .14, .14, .14, 0.7);
 	cairo_set_line_width (cr, em);
 	cairo_stroke_preserve (cr);
 	cairo_fill (cr);
@@ -491,7 +484,7 @@ icon_tav_shrink (cairo_t* cr, const int width, const int height)
 
 	cairo_set_source_rgba (cr, 1, 1, 1, .75);
 	cairo_stroke_preserve (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_fill (cr);
 
 	cairo_move_to (cr, x,       y + ar + 0.5);
@@ -501,7 +494,7 @@ icon_tav_shrink (cairo_t* cr, const int width, const int height)
 
 	cairo_set_source_rgba (cr, 1, 1, 1, .75);
 	cairo_stroke_preserve (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_fill (cr);
 }
 
@@ -527,7 +520,7 @@ icon_tav_expand (cairo_t* cr, const int width, const int height)
 
 	cairo_set_source_rgba (cr, 1, 1, 1, .5);
 	cairo_stroke_preserve (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_fill (cr);
 
 	cairo_move_to (cr, x,       y + wh - 0.5);
@@ -537,7 +530,7 @@ icon_tav_expand (cairo_t* cr, const int width, const int height)
 
 	cairo_set_source_rgba (cr, 1, 1, 1, .5);
 	cairo_stroke_preserve (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_fill (cr);
 }
 
@@ -563,7 +556,7 @@ icon_rec_enable (cairo_t* cr, const int width, const int height, const Gtkmm2ext
 		cairo_set_source_rgba (cr, .4, .3, .3, 1.0);
 	}
 	cairo_fill_preserve (cr);
-	cairo_set_source_rgba (cr, 0.0, 0.0, 0.0, 0.8); // outline
+	cairo_set_source_rgba (cr, .14, .14, .14, 0.8); // outline
 	cairo_set_line_width (cr, 1);
 	cairo_stroke (cr);
 }
@@ -686,7 +679,7 @@ icon_transport_loop (cairo_t* cr, const int width, const int height, const uint3
 	cairo_line_to (cr, ARCARROW (r * .74, .72));
 	cairo_line_to (cr, ARCARROW (r * .58, .72));
 
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_stroke_preserve (cr);
 	cairo_close_path (cr);
 	VECTORICONSTROKEFILLFG (1.0);
@@ -803,7 +796,7 @@ icon_transport_auto_return (cairo_t* cr, const int width, const int height, cons
 	cairo_line_to (cr, ARCARROW (r * .74, .5));
 	cairo_line_to (cr, ARCARROW (r * .58, .5));
 
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_stroke_preserve (cr);
 	cairo_close_path (cr);
 	VECTORICONSTROKEFILLFG (1.0);
@@ -920,7 +913,7 @@ icon_zoom (cairo_t* cr, const enum ArdourWidgets::ArdourIcon::Icon icon, const i
 	cairo_line_to (cr, LINE45DEG (1.3));
 	cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);
 	cairo_set_line_width (cr, 3.0);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_stroke (cr);
 #undef LINE45DEG
 
@@ -999,7 +992,7 @@ icon_zoom_expand (cairo_t* cr, const int width, const int height)
 
 	cairo_set_source_rgba (cr, 1, 1, 1, .5);
 	cairo_stroke_preserve (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_fill (cr);
 
 	cairo_move_to (cr, x + wh - 0.5, y);
@@ -1009,7 +1002,7 @@ icon_zoom_expand (cairo_t* cr, const int width, const int height)
 
 	cairo_set_source_rgba (cr, 1, 1, 1, .5);
 	cairo_stroke_preserve (cr);
-	cairo_set_source_rgba (cr, 0, 0, 0, 1.0);
+	cairo_set_source_rgba (cr, .14, .14, .14, 1.0);
 	cairo_fill (cr);
 }
 
