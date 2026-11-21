@@ -138,7 +138,7 @@ style "default" = "medium_text"
 
   engine "clearlooks"
   {
-    menubarstyle       = 2 # 0 = flat, 1 = sunken, 2 = flat gradient
+    menubarstyle       = 0 # 0 = flat, 1 = sunken, 2 = flat gradient
   }
 }
 

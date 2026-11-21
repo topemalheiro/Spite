@@ -143,6 +143,14 @@ load_custom_fonts()
 		}
 	}
 
+	/* Spite: Inter, the UI font of the "Spite" look (plugdata's own); the system sans is used if missing */
+	static char const* const inter_faces[] = { "InterRegular.ttf", "InterSemiBold.ttf", "InterBold.ttf" };
+	for (auto const& face : inter_faces) {
+		if (find_file (ardour_data_search_path(), face, font_file)) {
+			FcConfigAppFontAddFile(config, reinterpret_cast<const FcChar8*>(font_file.c_str()));
+		}
+	}
+
 	if (FcFalse == FcConfigSetCurrent(config)) {
 		cerr << _("Failed to set fontconfig configuration.") << endl;
 	}

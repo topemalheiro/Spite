@@ -912,7 +912,9 @@ def build(bld):
         key = font_sym
         font_subst_dict[key] = text
 
-    font_subst_dict['FONTFAMILY'] = ''
+    # Spite: plugdata's font, registered with fontconfig at start-up (load_custom_fonts); the system
+    # sans takes over if the file is missing
+    font_subst_dict['FONTFAMILY'] = 'Inter'
     # RC file
 
     obj              = bld(features = 'subst')
@@ -1051,9 +1053,10 @@ def build(bld):
 
     # Spite: plugdata's font (Inter), for the MCR's cables and Detective Mode. Copied next to
     # the binary, so a run from the build finds it on the data path too.
-    inter = bld.path.find_resource('../PgD4S/Resources/Fonts/InterRegular.ttf')
-    if inter:
-        bld(rule = 'cp ${SRC} ${TGT}', source = inter, target = 'InterRegular.ttf', install_path = bld.env['DATADIR'])
+    for face in ('InterRegular', 'InterSemiBold', 'InterBold'):
+        inter = bld.path.find_resource('../PgD4S/Resources/Fonts/' + face + '.ttf')
+        if inter:
+            bld(rule = 'cp ${SRC} ${TGT}', source = inter, target = face + '.ttf', install_path = bld.env['DATADIR'])
 
     # Application/Product specific resources (icon, splash)
     pgmname = bld.env['PROGRAM_NAME']
