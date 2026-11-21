@@ -505,9 +505,10 @@ DeviceFace::DeviceFace (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, 
 	, _picture_washed (false)
 	, _turned_to (true)
 {
-	_title.modify_bg (Gtk::STATE_NORMAL, Gdk::Color ("#464646"));
+	/* Spite: the header is a bar in the toolbar colour, like plugdata's */
+	_title.modify_bg (Gtk::STATE_NORMAL, Gtkmm2ext::gdk_color_from_rgba (UIConfiguration::instance ().color ("theme:bg2")));
 	_name.set_alignment (0, 0.5);
-	_name.modify_fg (Gtk::STATE_NORMAL, Gdk::Color ("#e6e6e6"));
+	_name.modify_fg (Gtk::STATE_NORMAL, Gtkmm2ext::gdk_color_from_rgba (UIConfiguration::instance ().color ("neutral:foreground")));
 	_name.set_ellipsize (Pango::ELLIPSIZE_END);
 	_enable_btn.set_tweaks (ArdourButton::ExpandtoSquare);
 	_enable_btn.set_active (_proc->enabled ());
