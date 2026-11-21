@@ -140,12 +140,12 @@
     <ColorAlias name="grid line micro" alias="neutral:midground"/>
     <ColorAlias name="grid line minor" alias="neutral:foreground2"/>
     <ColorAlias name="group tab base" alias="theme:bg2"/>
-    <ColorAlias name="gtk_audio_bus" alias="widget:blue darker"/>
+    <ColorAlias name="gtk_audio_bus" alias="theme:bg1"/>
     <ColorAlias name="gtk_audio_track" alias="theme:bg1"/>
     <ColorAlias name="gtk_automation_track_header" alias="theme:bg"/>
     <ColorAlias name="gtk_background" alias="theme:bg"/>
     <ColorAlias name="gtk_bases" alias="theme:bg2"/>
-    <ColorAlias name="gtk_bg_selected" alias="theme:contrasting selection"/>
+    <ColorAlias name="gtk_bg_selected" alias="widget:accent dim"/>
     <ColorAlias name="gtk_bg_tooltip" alias="theme:bg2"/>
     <ColorAlias name="gtk_bright_color" alias="widget:blue"/>
     <ColorAlias name="gtk_bright_indicator" alias="alert:red"/>
@@ -163,7 +163,7 @@
     <ColorAlias name="gtk_light_text_on_dark" alias="neutral:foreground2"/>
     <ColorAlias name="gtk_lightest" alias="neutral:foregroundest"/>
     <ColorAlias name="gtk_midi_channel_selector" alias="widget:blue"/>
-    <ColorAlias name="gtk_midi_track" alias="widget:green darker"/>
+    <ColorAlias name="gtk_midi_track" alias="theme:bg1"/>
     <ColorAlias name="gtk_mono" alias="neutral:foreground"/>
     <ColorAlias name="gtk_mute" alias="alert:yellow"/>
     <ColorAlias name="gtk_scrollbar_slider" alias="neutral:midground"/>
