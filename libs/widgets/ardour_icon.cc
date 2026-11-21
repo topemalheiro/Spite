@@ -37,7 +37,8 @@ using namespace ArdourWidgets::ArdourIcon;
  *   (usually white foreground, black outline)
  */
 
-#define DEFAULT_LINE_WIDTH ceil (std::min (width, height) * .035)
+/* Spite: one stroke weight for the line glyphs: 1.5 px, more only on big icons */
+#define DEFAULT_LINE_WIDTH std::max (1.5, ceil (std::min (width, height) * .035 * 2.) / 2.)
 
 #define OUTLINEWIDTH 1.5 // px
 
@@ -61,14 +62,14 @@ using namespace ArdourWidgets::ArdourIcon;
   cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);  \
   cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND); \
   Gtkmm2ext::set_source_rgba (cr, color);         \
-  cairo_set_line_width (cr, (LW));                \
+  cairo_set_line_width (cr, std::max<double> ((LW), 1.5)); \
   cairo_stroke (cr);
 
 #define VECTORICONSTROKE(LW, color)              \
   cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND); \
   cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND); \
   Gtkmm2ext::set_source_rgba (cr, color);        \
-  cairo_set_line_width (cr, (LW));               \
+  cairo_set_line_width (cr, std::max<double> ((LW), 1.5)); \
   cairo_stroke (cr);
 
 /** inverse color */
