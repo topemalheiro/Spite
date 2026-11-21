@@ -195,6 +195,9 @@ CueEntry::set_default_colors ()
 	}
 	name_button->set_fill_color (fg_col);
 
+	/* Spite: the scene number is plain readable text, not an unset colour */
+	jump_text->set_color (UIConfiguration::instance ().color ("neutral:foreground2"));
+
 	if (TriggerBox::cue_recording()) {
 		name_button->set_fill_color (UIConfiguration::instance ().color ("alert:ruddy"));
 	}

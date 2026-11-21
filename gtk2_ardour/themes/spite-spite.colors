@@ -48,6 +48,7 @@
     <Color name="theme:contrasting less" value="46B357FF"/>
     <Color name="theme:contrasting selection" value="42a2c8ff"/>  <!--gtk_bg_selected-->
     <Color name="widget:bg" value="303030ff"/>    <!--generic button-->
+    <Color name="widget:accent dim" value="2b6a84ff"/>  <!--accent as a fill: light text on it reads (4.9:1)-->
     <Color name="widget:blue" value="42a2c8ff"/>  <!--processor fader: fill-->
     <Color name="widget:blue darker" value="252d32ff"/>  <!--gtk_audio_bus-->
     <Color name="widget:blue lighter" value="5ab9deff"/>  <!--processor fader: fill-->
@@ -126,7 +127,7 @@
     <ColorAlias name="gain line" alias="alert:green"/>
     <ColorAlias name="gain line inactive" alias="theme:bg1"/>
     <ColorAlias name="generic button: fill" alias="widget:bg"/>
-    <ColorAlias name="generic button: fill active" alias="widget:blue"/>
+    <ColorAlias name="generic button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="generic button: led active" alias="alert:green"/>
     <ColorAlias name="generic button: outline" alias="neutral:backgroundest"/>
     <ColorAlias name="ghost track base" alias="neutral:background2"/>
@@ -189,7 +190,7 @@
     <ColorAlias name="location punch" alias="widget:ruddy"/>
     <ColorAlias name="location range" alias="theme:contrasting less"/>
     <ColorAlias name="location session" alias="theme:contrasting less"/>
-    <ColorAlias name="lock button: fill active" alias="widget:blue"/>
+    <ColorAlias name="lock button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="lock button: led active" alias="alert:red"/>
     <ColorAlias name="lua action button: fill" alias="widget:bg"/>
     <ColorAlias name="marker bar" alias="neutral:background2"/>
@@ -197,7 +198,7 @@
     <ColorAlias name="marker label" alias="neutral:backgroundest"/>
     <ColorAlias name="master monitor section button active: fill" alias="widget:ruddy"/>
     <ColorAlias name="master monitor section button active: fill active" alias="alert:yellow"/>
-    <ColorAlias name="master monitor section button normal: fill active" alias="widget:blue"/>
+    <ColorAlias name="master monitor section button normal: fill active" alias="widget:accent dim"/>
     <ColorAlias name="meter background bottom" alias="neutral:background2"/>
     <ColorAlias name="meter background top" alias="theme:bg"/>
     <ColorAlias name="meter bar" alias="theme:bg1"/>
@@ -272,33 +273,33 @@
     <ColorAlias name="monitor section solo option: fill active" alias="theme:bg"/>
     <ColorAlias name="monitor section solo option: led active" alias="alert:green"/>
     <ColorAlias name="mono panner bg" alias="theme:bg2"/>
-    <ColorAlias name="mono panner fill" alias="widget:blue"/>
+    <ColorAlias name="mono panner fill" alias="widget:accent dim"/>
     <ColorAlias name="mono panner outline" alias="theme:bg"/>
     <ColorAlias name="mono panner position fill" alias="theme:contrasting less"/>
     <ColorAlias name="mono panner position outline" alias="theme:bg"/>
     <ColorAlias name="mono panner text" alias="neutral:backgroundest"/>
     <ColorAlias name="mouse mode button: fill" alias="widget:bg"/>
-    <ColorAlias name="mouse mode button: fill active" alias="widget:blue"/>
+    <ColorAlias name="mouse mode button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="mouse mode button: led active" alias="alert:green"/>
     <ColorAlias name="mute button: fill" alias="widget:bg"/>
     <ColorAlias name="mute button: fill active" alias="alert:yellow"/>
     <ColorAlias name="mute button: led active" alias="alert:yellow"/>
     <ColorAlias name="nudge button: fill" alias="widget:bg"/>
-    <ColorAlias name="nudge button: fill active" alias="widget:blue"/>
+    <ColorAlias name="nudge button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="nudge button: led active" alias="alert:green"/>
     <ColorAlias name="nudge clock: background" alias="theme:bg2"/>
     <ColorAlias name="nudge clock: cursor" alias="theme:contrasting alt"/>
     <ColorAlias name="nudge clock: edited text" alias="theme:contrasting alt"/>
     <ColorAlias name="nudge clock: text" alias="theme:contrasting clock"/>
     <ColorAlias name="page switch button: fill" alias="widget:bg"/>
-    <ColorAlias name="page switch button: fill active" alias="widget:blue"/>
+    <ColorAlias name="page switch button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="pan knob" alias="widget:bg"/>
     <ColorAlias name="pan knob: arc end" alias="widget:orange"/>
     <ColorAlias name="pan knob: arc start" alias="widget:orange"/>
     <ColorAlias name="patch change button unnamed: fill" alias="neutral:background2"/>
-    <ColorAlias name="patch change button unnamed: fill active" alias="widget:blue"/>
+    <ColorAlias name="patch change button unnamed: fill active" alias="widget:accent dim"/>
     <ColorAlias name="patch change button: fill" alias="widget:bg"/>
-    <ColorAlias name="patch change button: fill active" alias="widget:blue"/>
+    <ColorAlias name="patch change button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="piano key black" alias="neutral:background2"/>
     <ColorAlias name="piano key highlight" alias="alert:ruddy"/>
     <ColorAlias name="piano key white" alias="neutral:foreground2"/>
@@ -311,24 +312,24 @@
     <ColorAlias name="play head" alias="theme:contrasting"/>
     <ColorAlias name="plugin automation state button: fill active" alias="alert:orange"/>
     <ColorAlias name="plugin bypass button: led active" alias="alert:red"/>
-    <ColorAlias name="pluginlist filter button: fill active" alias="widget:blue"/>
+    <ColorAlias name="pluginlist filter button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="pluginlist radio button: led active" alias="alert:cyan"/>
     <ColorAlias name="pluginui toggle: fill" alias="widget:bg"/>
-    <ColorAlias name="pluginui toggle: fill active" alias="widget:blue"/>
+    <ColorAlias name="pluginui toggle: fill active" alias="widget:accent dim"/>
     <ColorAlias name="preference highlight" alias="alert:yellow"/>
     <ColorAlias name="processor automation line" alias="alert:green"/>
     <ColorAlias name="processor auxfeedback: fill" alias="theme:contrasting alt"/>
     <ColorAlias name="processor auxfeedback: led active" alias="alert:green"/>
     <ColorAlias name="processor collapse button: fill" alias="widget:bg"/>
-    <ColorAlias name="processor collapse button: fill active" alias="widget:blue"/>
+    <ColorAlias name="processor collapse button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="processor control button: fill" alias="neutral:background"/>
     <ColorAlias name="processor control button: fill active" alias="neutral:background2"/>
     <ColorAlias name="processor control button: led active" alias="widget:blue"/>
     <ColorAlias name="processor control knob" alias="theme:bg"/>
     <ColorAlias name="processor control knob: arc end" alias="widget:blue"/>
     <ColorAlias name="processor control knob: arc start" alias="widget:blue"/>
-    <ColorAlias name="processor fader: fill" alias="widget:blue"/>
-    <ColorAlias name="processor fader: fill active" alias="widget:blue"/>
+    <ColorAlias name="processor fader: fill" alias="widget:accent dim"/>
+    <ColorAlias name="processor fader: fill active" alias="widget:accent dim"/>
     <ColorAlias name="processor fader: led active" alias="alert:green"/>
     <ColorAlias name="processor postfader: fill" alias="widget:green"/>
     <ColorAlias name="processor postfader: fill active" alias="widget:green"/>
@@ -410,13 +411,13 @@
     <ColorAlias name="solo button: fill active" alias="alert:green"/>
     <ColorAlias name="solo button: led active" alias="alert:green"/>
     <ColorAlias name="solo isolate: fill" alias="widget:bg"/>
-    <ColorAlias name="solo isolate: fill active" alias="widget:blue"/>
+    <ColorAlias name="solo isolate: fill active" alias="widget:accent dim"/>
     <ColorAlias name="solo isolate: led active" alias="alert:ruddy"/>
     <ColorAlias name="solo safe: fill" alias="widget:bg"/>
-    <ColorAlias name="solo safe: fill active" alias="widget:blue"/>
+    <ColorAlias name="solo safe: fill active" alias="widget:accent dim"/>
     <ColorAlias name="solo safe: led active" alias="alert:ruddy"/>
     <ColorAlias name="stereo panner bg" alias="theme:bg2"/>
-    <ColorAlias name="stereo panner fill" alias="widget:blue"/>
+    <ColorAlias name="stereo panner fill" alias="widget:accent dim"/>
     <ColorAlias name="stereo panner inverted bg" alias="widget:blue darker"/>
     <ColorAlias name="stereo panner inverted fill" alias="theme:contrasting less"/>
     <ColorAlias name="stereo panner inverted outline" alias="alert:ruddy"/>
