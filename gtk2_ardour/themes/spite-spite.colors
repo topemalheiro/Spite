@@ -9,16 +9,16 @@
     <Color name="alert:red" value="f10000ff"/>
     <Color name="alert:ruddy" value="bb2828ff"/>
     <Color name="alert:yellow" value="e0e000ff"/>
-    <Color name="meter color0" value="008800ff"/>
-    <Color name="meter color1" value="00aa00ff"/>
-    <Color name="meter color2" value="00ff00ff"/>
-    <Color name="meter color3" value="00ff00ff"/>
-    <Color name="meter color4" value="fff000ff"/>
-    <Color name="meter color5" value="fff000ff"/>
-    <Color name="meter color6" value="ff8800ff"/>
-    <Color name="meter color7" value="ff8800ff"/>
-    <Color name="meter color8" value="ff0000ff"/>
-    <Color name="meter color9" value="ff0000ff"/>
+    <Color name="meter color0" value="2f7f9cff"/>
+    <Color name="meter color1" value="3b93b5ff"/>
+    <Color name="meter color2" value="42a2c8ff"/>
+    <Color name="meter color3" value="42a2c8ff"/>
+    <Color name="meter color4" value="d9b84aff"/>
+    <Color name="meter color5" value="d9b84aff"/>
+    <Color name="meter color6" value="ff8500ff"/>
+    <Color name="meter color7" value="ff8500ff"/>
+    <Color name="meter color8" value="e5342aff"/>
+    <Color name="meter color9" value="e5342aff"/>
     <Color name="midi meter 52" value="e8faa1ff"/>
     <Color name="midi meter 53" value="f2c37dff"/>
     <Color name="midi meter 54" value="ffac44ff"/>
@@ -200,7 +200,7 @@
     <ColorAlias name="master monitor section button active: fill active" alias="alert:yellow"/>
     <ColorAlias name="master monitor section button normal: fill active" alias="widget:accent dim"/>
     <ColorAlias name="meter background bottom" alias="neutral:background2"/>
-    <ColorAlias name="meter background top" alias="theme:bg"/>
+    <ColorAlias name="meter background top" alias="neutral:background2"/>
     <ColorAlias name="meter bar" alias="theme:bg1"/>
     <ColorAlias name="meter color BBC" alias="alert:orange"/>
     <ColorAlias name="meter marker" alias="widget:orange"/>

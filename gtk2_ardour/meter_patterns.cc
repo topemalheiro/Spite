@@ -610,7 +610,7 @@ meter_render_metrics (Gtk::Widget& w, MeterType type, vector<DataType> types)
 
 	bool tickleft, tickright;
 	bool background;
-	int overlay_midi = 1;
+	int overlay_midi = 0; /* Spite: no MIDI scale overlaid on an audio one */
 	gint width, height;
 	win->get_size (width, height);
 
@@ -648,7 +648,7 @@ meter_render_metrics (Gtk::Widget& w, MeterType type, vector<DataType> types)
 #endif
 
 	font.set_weight (Pango::WEIGHT_NORMAL);
-	font.set_size (8.0 * fixfontsize * PANGO_SCALE);
+	font.set_size (7.0 * fixfontsize * PANGO_SCALE);
 	font_attr = new Pango::AttrFontDesc (Pango::Attribute::create_attr_font_desc (font));
 	audio_font_attributes.change (*font_attr);
 	delete font_attr;
@@ -704,7 +704,8 @@ meter_render_metrics (Gtk::Widget& w, MeterType type, vector<DataType> types)
 		case DataType::AUDIO:
 			layout->set_attributes (audio_font_attributes);
 			if (type == MeterPeak0dB) {
-				overlay_midi = 4;
+				/* Spite: one scale per meter; the MIDI scale overlaid on an audio one doubled the labels */
+				overlay_midi = 0;
 			}
 			switch (type) {
 				case MeterK12:
