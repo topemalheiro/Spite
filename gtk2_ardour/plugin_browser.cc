@@ -77,8 +77,12 @@ PluginBrowser::PluginBrowser (bool mode_bar)
 	_display.get_selection ()->set_mode (Gtk::SELECTION_SINGLE);
 	_display.set_reorderable (false);
 	_display.set_headers_visible (false);
-	_display.set_rules_hint (true);
+	_display.set_rules_hint (false); /* Spite: plain rows, selection is the only highlight */
 	_display.set_can_focus (false);
+	if (Gtk::CellRenderer* cr = _display.get_column_cell_renderer (0)) {
+		/* room around the names, like plugdata's lists */
+		cr->set_padding (8, 4);
+	}
 	_display.add_object_drag (_columns.plugin.index (), "x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP);
 	_display.set_drag_column (_columns.name.index ());
 	_display.add_drop_targets (target_list);

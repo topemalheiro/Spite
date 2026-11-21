@@ -453,10 +453,10 @@
     <ColorAlias name="tracknumber label: fill active" alias="neutral:background2"/>
     <ColorAlias name="tracknumber label: led active" alias="alert:red"/>
     <ColorAlias name="transport active option button: fill" alias="widget:bg"/>
-    <ColorAlias name="transport active option button: fill active" alias="alert:green"/>
+    <ColorAlias name="transport active option button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="transport active option button: led active" alias="alert:green"/>
     <ColorAlias name="transport button: fill" alias="widget:bg"/>
-    <ColorAlias name="transport button: fill active" alias="alert:green"/>
+    <ColorAlias name="transport button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="transport button: led active" alias="alert:green"/>
     <ColorAlias name="transport clock: background" alias="theme:bg2"/>
     <ColorAlias name="transport clock: cursor" alias="theme:contrasting alt"/>
@@ -468,7 +468,7 @@
     <ColorAlias name="transport delta clock: text" alias="theme:contrasting alt"/>
     <ColorAlias name="transport loop rect" alias="widget:blue"/>
     <ColorAlias name="transport option button: fill" alias="widget:bg"/>
-    <ColorAlias name="transport option button: fill active" alias="theme:contrasting less"/>
+    <ColorAlias name="transport option button: fill active" alias="widget:accent dim"/>
     <ColorAlias name="transport option button: led active" alias="alert:green"/>
     <ColorAlias name="transport punch rect" alias="widget:ruddy"/>
     <ColorAlias name="transport recenable button: fill" alias="widget:bg"/>

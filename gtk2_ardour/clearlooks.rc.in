@@ -84,9 +84,9 @@ style "default" = "medium_text"
   GtkMenu             :: arrow-scaling                    = 0.5               # [             0.7 ] ( 0.1  ) Arbitrary constant to scale down the size of the scroll arrow.
   GtkMenu             :: double-arrows                    = 1                 # [               1 ] ( bool ) When scrolling, always show both arrows.
   GtkMenu             :: horizontal-offset                = -2                # [              -2 ]          When the menu is a submenu, position it this number of pixels offset horizontally.
-  GtkMenu             :: horizontal-padding               = 0                 # [               0 ] ( >= 0 ) Extra space at the left and right edges of the menu.
+  GtkMenu             :: horizontal-padding               = 3                 # [               0 ] ( >= 0 ) Extra space at the left and right edges of the menu.
   GtkMenu             :: vertical-offset                  = 0                 # [               0 ]          When the menu is a submenu, position it this number of pixels offset vertically.
-  GtkMenu             :: vertical-padding                 = 0                 # [               0 ] ( >= 0 ) Extra space at the top and bottom of the menu.
+  GtkMenu             :: vertical-padding                 = 4                 # [               0 ] ( >= 0 ) Extra space at the top and bottom of the menu.
 
   GtkMenuItem         :: arrow-scaling                    = 0.5               # [             0.8 ] ( 0.2  ) Amount of space used up by arrow, relative to the menu item's font size.
   GtkMenuItem         :: arrow-spacing                    = 10                # [              10 ] ( >= 0 ) Space between label and arrow.
@@ -117,7 +117,7 @@ style "default" = "medium_text"
   fg[NORMAL]          = @foreground
   fg[PRELIGHT]        = @foreground
   fg[ACTIVE]          = shade(0.9, @foreground)
-  fg[INSENSITIVE]     = shade(0.7, @background)
+  fg[INSENSITIVE]     = mix(0.45, @foreground, @background) # Spite: disabled text stays readable (was nearly invisible on dark)
   fg[SELECTED]        = @fg_selected
 
   # These base and text colors will be used by treeviews and some other widgets.
