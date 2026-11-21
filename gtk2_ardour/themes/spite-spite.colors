@@ -44,7 +44,7 @@
     <Color name="theme:bg2" value="191919ff"/>  <!--ruler base-->
     <Color name="theme:contrasting" value="0xf10000ff"/>  <!--play head-->
     <Color name="theme:contrasting alt" value="CCA336ff"/>  <!--delta clock , clock edit-->
-    <Color name="theme:contrasting clock" value="78cd2fff"/>  <!--clock: text-->
+    <Color name="theme:contrasting clock" value="e1e1e1ff"/>  <!--clock: text-->
     <Color name="theme:contrasting less" value="46B357FF"/>
     <Color name="theme:contrasting selection" value="42a2c8ff"/>  <!--gtk_bg_selected-->
     <Color name="widget:bg" value="303030ff"/>    <!--generic button-->

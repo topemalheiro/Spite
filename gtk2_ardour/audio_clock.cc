@@ -95,7 +95,7 @@ AudioClock::AudioClock (const string& clock_name, bool transient, const string& 
 	, style_resets_first (true)
 	, layout_height (0)
 	, layout_width (0)
-	, corner_radius (4)
+	, corner_radius (5)
 	, font_size (10240)
 	, editing (false)
 	, dragging (false)
@@ -106,6 +106,14 @@ AudioClock::AudioClock (const string& clock_name, bool transient, const string& 
 {
 	if (editable) {
 		set_can_focus ();
+	}
+
+	/* Spite: the clock's font is Inter, whose digits are proportional unless asked for tabular ones;
+	 * without "tnum" the digits would jump as the time runs */
+	{
+		PangoAttribute* tnum = pango_attr_font_features_new ("tnum=1");
+		pango_attr_list_insert (normal_attributes.gobj (), pango_attribute_copy (tnum));
+		pango_attr_list_insert (editing_attributes.gobj (), tnum);
 	}
 
 	_layout = Pango::Layout::create (get_pango_context());
