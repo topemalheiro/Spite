@@ -365,6 +365,7 @@ AudioClock::set_clock_dimensions (Gtk::Requisition& req)
 	}
 
 	tmp->set_font_description (font);
+	tmp->set_attributes (normal_attributes); /* Spite: measure with the same tabular digits we draw with */
 
 	/* this string is the longest thing we will ever display */
 	if (_mode == MinSec)
