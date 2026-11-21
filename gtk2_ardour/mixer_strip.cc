@@ -283,7 +283,7 @@ MixerStrip::init ()
 	bottom_button_table.attach (*rta_button,   1, 2, 1, 2);
 
 	name_button.set_name ("mixer strip button");
-	name_button.set_text_ellipsize (Pango::ELLIPSIZE_END);
+	name_button.set_text_ellipsize (Pango::ELLIPSIZE_MIDDLE); /* Spite: keep the end of the name (numbers) visible */
 	name_button.signal_size_allocate().connect (sigc::mem_fun (*this, &MixerStrip::name_button_resized));
 
 	set_tooltip (&group_button, _("Mix group"));

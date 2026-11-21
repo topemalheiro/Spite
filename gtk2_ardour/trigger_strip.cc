@@ -147,7 +147,7 @@ TriggerStrip::init ()
 	_tmaster = new TriggerMaster (_tmaster_widget.root ());
 
 	_name_button.set_name ("mixer strip button");
-	_name_button.set_text_ellipsize (Pango::ELLIPSIZE_END);
+	_name_button.set_text_ellipsize (Pango::ELLIPSIZE_MIDDLE); /* Spite: keep the end of the name (numbers) visible */
 	_name_button.signal_size_allocate ().connect (sigc::mem_fun (*this, &TriggerStrip::name_button_resized));
 
 	/* Spite: the master strip keeps the input and clip-record rows empty,

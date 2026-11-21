@@ -1020,8 +1020,8 @@ style "paler_bright_when_active" = "medium_text"
 
 style "selected_strip_frame"
 {
-	fg[NORMAL] = @bright_indicator
-	bg[NORMAL] = darker(@bright_indicator)
+	fg[NORMAL] = @bright_color
+	bg[NORMAL] = @bright_color # Spite: selection is the accent (other themes: their bright colour)
 }
 
 style "flashing_alert" = "smaller_text"
