@@ -117,6 +117,13 @@ private:
 	bool  rec_blink_on;
 	bool _drawn_selected; /* Spite: drawn with the selection's border */
 
+	/* Spite: a slot is a flat rounded cell drawn in render(): an empty one is a quiet panel-coloured
+	 * cell, a loaded one a block of the clip's colour with its name. The child rectangles are only
+	 * hit areas (transparent) unless the pointer is over them. */
+	bool             _cell_empty;
+	Gtkmm2ext::Color _block_fill;
+	Gtkmm2ext::Color _block_outline;
+
 	bool event (GdkEvent*);
 
 	void connect_to_trigger () override; /* TriggerUI's, and the trigger's ArmChanged */

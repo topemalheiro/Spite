@@ -56,6 +56,7 @@
 #include "trigger_ui.h"
 #include "scene_scroll.h"
 #include "triggerbox_ui.h"
+#include "spite_look.h"
 #include "ui_config.h"
 #include "utils.h"
 
@@ -74,6 +75,9 @@ TriggerEntry::TriggerEntry (Item* item, TriggerStrip& s, TriggerReference tr)
 	, _drag_active (false)
 	, rec_blink_on (false)
 	, _drawn_selected (false)
+	, _cell_empty (false)
+	, _block_fill (0)
+	, _block_outline (0)
 {
 	set_layout_sensitive (true); // why???
 
@@ -394,13 +398,13 @@ TriggerEntry::draw_launch_icon (Cairo::RefPtr<Cairo::Context> context, float sz,
 			if (!tref.box ()->has_stop (tref.slot ())) {
 				return;
 			}
-			context->move_to (margin, margin);
-			context->rel_line_to (size, 0);
-			context->rel_line_to (0, size);
-			context->rel_line_to (-size, 0);
-			context->rel_line_to (0, -size);
-			set_source_rgba (context, UIConfiguration::instance ().color ("neutral:midground"));
-			context->stroke ();
+			/* Spite: a small filled rounded square, Live's stop button */
+			{
+				const float g = size * 0.66;
+				Gtkmm2ext::rounded_rectangle (context, margin + (size - g) * 0.5, margin + (size - g) * 0.5, g, g, 1.5 * scale);
+				set_source_rgba (context, UIConfiguration::instance ().color ("neutral:midground"));
+				context->fill ();
+			}
 			return;
 		}
 
@@ -549,6 +553,26 @@ TriggerEntry::render (ArdourCanvas::Rect const& area, Cairo::RefPtr<Cairo::Conte
 		context->fill ();
 	}
 
+	/* Spite: the slot's flat rounded cell or clip block, under the children */
+	{
+		const double r = 3 * scale;
+		if (_cell_empty) {
+			Gtkmm2ext::rounded_rectangle (context, self.x0 + scale, self.y0 + scale, width - 2 * scale, height - 2 * scale, r);
+			set_source_rgba (context, SpiteLook::color (SpiteLook::Panel));
+			context->fill ();
+		} else if (_block_fill) {
+			Gtkmm2ext::rounded_rectangle (context, self.x0 + height, self.y0 + scale, width - 2 * height, height - 2 * scale, r);
+			set_source_rgba (context, _block_fill);
+			context->fill ();
+			if (_block_outline && _block_outline != _block_fill) {
+				context->set_line_width (1.5 * scale);
+				Gtkmm2ext::rounded_rectangle (context, self.x0 + height + 0.75 * scale, self.y0 + 1.75 * scale, width - 2 * height - 1.5 * scale, height - 3.5 * scale, r);
+				set_source_rgba (context, _block_outline);
+				context->stroke ();
+			}
+		}
+	}
+
 	render_children (area, context);
 
 	std::shared_ptr<Trigger const> const v (view ());
@@ -679,7 +703,37 @@ TriggerEntry::set_widget_colors (TriggerEntry::EnteredState es)
 	/*preserve selection border*/
 	_drawn_selected = PublicEditor::instance ().get_selection ().selected (trigger_reference ());
 	if (_drawn_selected) {
-		name_button->set_outline_color (UIConfiguration::instance ().color ("alert:red"));
+		name_button->set_outline_color (SpiteLook::color (SpiteLook::Accent));
+	}
+
+	/* Spite: the cell or block is drawn in render(); the rectangles keep only their hover highlight */
+	_cell_empty = !v->playable ();
+	if (v->playable ()) {
+		_block_fill    = name_button->fill_color ();
+		_block_outline = _drawn_selected ? name_button->outline_color () : 0;
+		name_button->set_fill_color (0);
+		name_button->set_outline_color (0);
+		if (es != PlayEntered) {
+			play_button->set_fill_color (0);
+			play_button->set_outline_color (0);
+		}
+		if (es != FollowEntered) {
+			follow_button->set_fill_color (0);
+		}
+	} else {
+		_block_fill    = 0;
+		_block_outline = 0;
+		if (es != NameEntered) {
+			name_button->set_fill_color (0);
+			name_button->set_outline_color (0);
+		}
+		if (es != PlayEntered) {
+			play_button->set_fill_color (0);
+			play_button->set_outline_color (0);
+		}
+		if (es != FollowEntered) {
+			follow_button->set_fill_color (0);
+		}
 	}
 
 	/*draw a box around 'queued' trigger*/

@@ -75,7 +75,7 @@ CueEntry::CueEntry (Item* item, uint64_t cue_index)
 
 	name_button = new ArdourCanvas::Circle (this);
 	name_button->set_outline (false);
-	name_button->set_fill (true);
+	name_button->set_fill (false); /* Spite: the launch button is a flat play glyph drawn in render(), in this item's fill colour */
 	name_button->name = ("slot_selector_button");
 	name_button->show ();
 
@@ -180,6 +180,17 @@ CueEntry::render (ArdourCanvas::Rect const& area, Cairo::RefPtr<Cairo::Context> 
 	}
 
 	render_children (area, context);
+
+	/* Spite: the launch button, a flat play triangle in the button's colour (green; ruddy while cue-recording) */
+	{
+		const double h = _rect.height ();
+		context->move_to (self.x0 + h * 0.36, self.y0 + h * 0.27);
+		context->line_to (self.x0 + h * 0.76, self.y0 + h * 0.5);
+		context->line_to (self.x0 + h * 0.36, self.y0 + h * 0.73);
+		context->close_path ();
+		set_source_rgba (context, name_button->fill_color ());
+		context->fill ();
+	}
 }
 
 void
